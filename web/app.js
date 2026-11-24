@@ -47,16 +47,23 @@ let arVoice=null;
 function pickVoice(){if(!('speechSynthesis'in window))return;const v=speechSynthesis.getVoices().filter(x=>/^ar/i.test(x.lang));
  arVoice=v.find(x=>x.name===S.set.voiceName)||v.find(x=>/EG/i.test(x.lang)&&/Natural|Online|Salma|Shakir/i.test(x.name))||v.find(x=>/EG/i.test(x.lang))||v.find(x=>/Natural|Online|Google/i.test(x.name))||v[0]||null}
 if('speechSynthesis'in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
-const azOn=()=>!!(S.set.az&&S.set.az.key&&S.set.az.region);
-const azName=t=>'c'+hid((S.set.az.voice||'')+'|'+S.set.rate+'|'+t)+'.mp3';
+const elOn=()=>!!(S.set.el&&S.set.el.key&&S.set.el.voice);
+const azOn=()=>!elOn()&&!!(S.set.az&&S.set.az.key&&S.set.az.region);
+const cloudOn=()=>elOn()||azOn();
+const plain=t=>String(t).replace(/[ً-ْ]/g,'');
+const cloudName=t=>'c'+hid((elOn()?'el|'+S.set.el.voice:'az|'+(S.set.az.voice||''))+'|'+S.set.rate+'|'+t)+'.mp3';
 const azCache=new Map();
-async function azBlob(text){const k=azName(text);if(azCache.has(k))return azCache.get(k);const a=S.set.az;const x=text.replace(/&/g,'&amp;').replace(/</g,'&lt;');
- const r=await fetch('https://'+a.region+'.tts.speech.microsoft.com/cognitiveservices/v1',{method:'POST',headers:{'Ocp-Apim-Subscription-Key':a.key,'Content-Type':'application/ssml+xml','X-Microsoft-OutputFormat':'audio-24khz-48kbitrate-mono-mp3'},
-  body:"<speak version='1.0' xml:lang='ar-EG'><voice name='"+(a.voice||'ar-EG-SalmaNeural')+"'><prosody rate='"+Math.round((S.set.rate-1)*100)+"%'>"+x+"</prosody></voice></speak>"});
- if(!r.ok)throw new Error('az '+r.status);const b=await r.blob();azCache.set(k,b);return b}
-async function azFile(text){const a=S.set.az;const r=await NP.cloudTts({text,key:a.key,region:a.region,voice:a.voice||'ar-EG-SalmaNeural',rate:S.set.rate,name:azName(text)});return r.path}
+async function cloudBlob(text){text=plain(text);const k=cloudName(text);if(azCache.has(k))return azCache.get(k);let r;
+ if(elOn()){const e=S.set.el;r=await fetch('https://api.elevenlabs.io/v1/text-to-speech/'+encodeURIComponent(e.voice)+'?output_format=mp3_44100_64',{method:'POST',headers:{'xi-api-key':e.key,'Content-Type':'application/json',accept:'audio/mpeg'},body:JSON.stringify({text,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.75,speed:Math.min(1.2,Math.max(.7,S.set.rate))}})})}
+ else{const a=S.set.az;const x=text.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  r=await fetch('https://'+a.region+'.tts.speech.microsoft.com/cognitiveservices/v1',{method:'POST',headers:{'Ocp-Apim-Subscription-Key':a.key,'Content-Type':'application/ssml+xml','X-Microsoft-OutputFormat':'audio-24khz-48kbitrate-mono-mp3'},
+  body:"<speak version='1.0' xml:lang='ar-EG'><voice name='"+(a.voice||'ar-EG-SalmaNeural')+"'><prosody rate='"+Math.round((S.set.rate-1)*100)+"%'>"+x+"</prosody></voice></speak>"})}
+ if(!r.ok)throw new Error('tts '+r.status);const b=await r.blob();azCache.set(k,b);return b}
+async function cloudFile(text){text=plain(text);const o={text,rate:S.set.rate,name:cloudName(text)};
+ if(elOn()){o.provider='eleven';o.key=S.set.el.key;o.voice=S.set.el.voice}else{const a=S.set.az;o.provider='azure';o.key=a.key;o.region=a.region;o.voice=a.voice||'ar-EG-SalmaNeural'}
+ const r=await NP.cloudTts(o);return r.path}
 async function speak(text,force){if((!S.set.voice&&!force)||!text)return;if(NATIVE&&wakeOn){stopWake();setTimeout(startWake,4000)}text=egSay(text);
- if(azOn()){try{if(NATIVE){const f=await azFile(text);await NP.playFile({path:f});return}const b=await azBlob(text);await new Promise(res=>{const a=new Audio(URL.createObjectURL(b));a.onended=a.onerror=res;a.play().catch(res)});return}catch(e){}}
+ if(cloudOn()){try{if(NATIVE){const f=await cloudFile(text);await NP.playFile({path:f});return}const b=await cloudBlob(text);await new Promise(res=>{const a=new Audio(URL.createObjectURL(b));a.onended=a.onerror=res;a.play().catch(res)});return}catch(e){}}
  if(NATIVE){try{await NP.speak({text,rate:S.set.rate,voice:S.set.voiceName||''})}catch(e){}return}
  if(!('speechSynthesis'in window))return;
  await new Promise(res=>{try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=arVoice?arVoice.lang:'ar-EG';if(arVoice)u.voice=arVoice;u.rate=S.set.rate;u.onend=u.onerror=()=>res();speechSynthesis.speak(u);setTimeout(res,Math.min(15000,1500+text.length*120))}catch(e){res()}})}
@@ -64,9 +71,9 @@ async function speak(text,force){if((!S.set.voice&&!force)||!text)return;if(NATI
 const remLine=t=>(S.set.name?'يا '+S.set.name+'، ':'')+(t.note&&(!t.text||t.text==='فويس نوت')?'عندك فويس نوت، افتحها واسمعها':'بفكرك: '+t.text);
 /* with the Azure voice on, prepare the reminder sentence as a file so the phone can play it while the app is closed */
 let clipBusy=false;
-async function ensureClips(){if(!NATIVE||!azOn()||clipBusy)return;clipBusy=true;let got=false;
+async function ensureClips(){if(!NATIVE||!cloudOn()||clipBusy)return;clipBusy=true;let got=false;
  try{for(const t of S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at>Date.now()-36e5&&t.at<Date.now()+7*864e5).slice(0,40)){const line=egSay(remLine(t));if(t.vclip&&t.vclip.line===line)continue;
-  try{const path=await azFile(line);t.vclip={line,path};got=true}catch(e){break}}}finally{clipBusy=false}if(got){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}nsched()}}
+  try{const path=await cloudFile(line);t.vclip={line,path};got=true}catch(e){break}}}finally{clipBusy=false}if(got){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}nsched()}}
 /* ---------- speech in ---------- */
 const WebSR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const canListen=()=>NATIVE||!!WebSR;
@@ -354,7 +361,7 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  '<div class="set"><label>يقول "تم التسجيل" بعد كل تذكير</label><input type="checkbox" class="sw" id="sConf"'+(s.confirm?' checked':'')+'></div>'+
  '<div class="set"><label>سرعة الكلام</label><input type="range" id="sRate" min="0.6" max="1.4" step="0.1" value="'+s.rate+'" style="width:150px"></div>'+
  (canWake()?'<div class="set"><label>"يا سمسم" وهو مفتوح<small>قول "يا سمسم" ويفتحلك تذكير جديد بصوتك، أو قول الجملة كلها مرة واحدة: "يا سمسم فكرني بعد ساعة أكلم محمد".'+(NATIVE?' (وسمسم سامعك، صوت الأغاني بيتكتم عشان صفارة الميكروفون)':'')+'</small></label><input type="checkbox" class="sw" id="sWake"'+(s.wake?' checked':'')+'></div>':'')+
- '<div class="set"><label>صوت الموبايل<small>جرّب الأصوات العربي واختار أحسنها</small></label><select id="sVc" style="max-width:200px"><option value="">تلقائي</option></select></div>'+'<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+'<div class="set" style="display:block"><label>صوت مصري طبيعي (اختياري)<small>أصوات الموبايل عربي فصحى. لو عايز صوت مصري حقيقي (سلمى أو شاكر من مايكروسوفت) حط مفتاح Azure Speech المجاني هنا. من غيره سمسم هيشتغل عادي بصوت الموبايل.</small></label><div class="form"><input id="azK" placeholder="Azure Speech key" value="'+esc(s.az&&s.az.key||'')+'" dir="ltr"><div class="row"><input id="azR" placeholder="region مثلاً uaenorth" value="'+esc(s.az&&s.az.region||'')+'" dir="ltr" style="flex:1"><select id="azV" style="flex:1"><option value="ar-EG-SalmaNeural">سلمى (ست)</option><option value="ar-EG-ShakirNeural"'+(s.az&&s.az.voice==='ar-EG-ShakirNeural'?' selected':'')+'>شاكر (راجل)</option></select></div><div class="row"><button class="btn sm sp" id="azS">احفظ وجرّب</button>'+(s.az&&s.az.key?'<button class="btn sm ghost" id="azD">إلغاء الصوت المصري</button>':'')+'</div></div></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
+ '<div class="set"><label>صوت الموبايل<small>جرّب الأصوات العربي واختار أحسنها</small></label><select id="sVc" style="max-width:200px"><option value="">تلقائي</option></select></div>'+'<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+'<div class="set" style="display:block" id="cloudBox"></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
  '<div class="card"><h3>الشكل</h3><div class="set"><label>الوضع<small>تقدر كمان تبدّل من زرار ☀️/🌙 فوق في الرئيسية</small></label><select id="sTheme"><option value="auto">تلقائي (نهاري الصبح وليلي بالليل)</option><option value="light"'+(s.theme==='light'?' selected':'')+'>نهاري ☀️</option><option value="dark"'+(s.theme==='dark'?' selected':'')+'>ليلي 🌙</option></select></div></div>'+
  '<div class="card" id="permCard"></div>'+
  '<div class="card"><h3>تجربة</h3><div class="set"><label>جرّب تذكير بعد ١٠ ثواني<small>عشان تشوف الـ Pop-up والصوت'+(NATIVE?' — اقفل الشاشة واستنى':'')+'</small></label><button class="btn sm" id="sTest">جرّب</button></div></div>'+
@@ -371,15 +378,39 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  on('#sTheme','change',e=>{s.theme=e.target.value;save();applyTheme()});
  fillVoices();
  on('#sVc','change',e=>{s.voiceName=e.target.value;save();pickVoice();speak('أهلاً، أنا سمسم. ده صوتي الجديد',true)});
- on('#azS','click',async()=>{const key=$('#azK').value.trim(),region=$('#azR').value.trim().toLowerCase();if(!key||!region){toast('اكتب المفتاح والـ region');return}
-  s.az={key,region,voice:$('#azV').value};save();toast('بجرّب الصوت…');try{if(NATIVE)await NP.playFile({path:await azFile(egSay('أهلاً'+(s.name?' يا '+s.name:'')+'، أنا سمسم، وده صوتي المصري'))});else{const b=await azBlob(egSay('أهلاً، أنا سمسم، وده صوتي المصري'));await new Audio(URL.createObjectURL(b)).play()}toast('اشتغل 👌');S.tasks.forEach(t=>delete t.vclip);save()}catch(e){toast('المفتاح أو الـ region مش مظبوطين، أو مفيش نت');}renderSet()});
- on('#azD','click',()=>{delete s.az;S.tasks.forEach(t=>delete t.vclip);save();renderSet();toast('رجعنا لصوت الموبايل')});
+ renderCloud();
  on('#sTest','click',()=>{unlockAudio();const t=addTask({text:'ده تذكير تجربة من سمسم',at:Date.now()+10000,src:'test'});toast('استنى ١٠ ثواني…')});
  on('#sExp','click',()=>{const b=$('#sBox');b.hidden=false;b.value=JSON.stringify({...S,tasks:S.tasks.map(t=>({...t}))});b.select();try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([b.value],{type:'application/json'}));a.download='smsm-backup-'+dk(new Date())+'.json';a.click()}catch(e){}});
  on('#sImp','click',()=>{const b=$('#sBox');if(b.hidden||!b.value.trim()){b.hidden=false;b.value='';b.placeholder='الصق البيانات هنا ودوس استورد تاني';b.focus();return}try{const o=JSON.parse(b.value);if(!o.tasks)throw 0;S={...JSON.parse(JSON.stringify(DEF)),...o,set:{...DEF.set,...o.set}};save();render();renderSet();toast('اتستوردت')}catch(e){toast('البيانات دي مش سليمة')}});
  on('#sClr','click',()=>{if(!confirmBox('أمسح كل المهام اللي خلصت أو اتقفلت؟ (التقارير هتفضل)'))return;S.tasks.filter(t=>t.done||t.closed).forEach(t=>{if(t.note)idbDel(t.note)});S.tasks=S.tasks.filter(t=>!(t.done||t.closed));save();render();toast('اتمسحت')});
  $$('#setBody [data-o]').forEach(b=>b.onclick=()=>NP.open({what:b.dataset.o}));
  renderPerm()}
+/* natural Egyptian voice: ElevenLabs (preferred) or Microsoft Azure */
+let elList=null;
+function renderCloud(){const c=$('#cloudBox');if(!c)return;const s=S.set,el=s.el||{},az=s.az||{};const prov=s.cloudTab||(az.key&&!el.key?'azure':'eleven');
+ const on=elOn()?'ElevenLabs — '+esc(el.vname||el.voice):azOn()?'Microsoft — '+(az.voice==='ar-EG-ShakirNeural'?'شاكر':'سلمى'):'';
+ let h='<label>صوت مصري طبيعي<small>'+(on?'شغّال دلوقتي: <b>'+on+'</b>':'أصوات الموبايل فصحى. حط مفتاح ElevenLabs وسمسم هيقول كل حاجة بالصوت المصري اللي تختاره، حتى كلامك.')+'</small></label>'+
+ '<div class="snz" style="margin-top:8px"><button data-t="eleven" class="'+(prov==='eleven'?'on':'')+'">ElevenLabs</button><button data-t="azure" class="'+(prov==='azure'?'on':'')+'">Microsoft Azure</button></div><div class="form">';
+ if(prov==='eleven'){h+='<input id="elK" placeholder="ElevenLabs API key" dir="ltr" value="'+esc(el.key||'')+'"><button class="btn sm ghost" id="elL">هات أصواتي</button>'+
+  '<select id="elV">'+(elList?elList.map(v=>'<option value="'+esc(v.id)+'"'+(v.id===el.voice?' selected':'')+'>'+esc(v.label)+'</option>').join(''):(el.voice?'<option value="'+esc(el.voice)+'">'+esc(el.vname||el.voice)+'</option>':'<option value="">دوس "هات أصواتي" الأول</option>'))+'</select>'+
+  '<div class="row"><button class="btn sm sp" id="elS">احفظ وجرّب</button>'+(el.key?'<button class="btn sm ghost" id="elD">إلغاء</button>':'')+'</div>'}
+ else{h+='<input id="azK" placeholder="Azure Speech key" dir="ltr" value="'+esc(az.key||'')+'"><div class="row"><input id="azR" placeholder="region مثلاً eastus" dir="ltr" value="'+esc(az.region||'')+'" style="flex:1"><select id="azV" style="flex:1"><option value="ar-EG-SalmaNeural">سلمى (ست)</option><option value="ar-EG-ShakirNeural"'+(az.voice==='ar-EG-ShakirNeural'?' selected':'')+'>شاكر (راجل)</option></select></div>'+
+  '<div class="row"><button class="btn sm sp" id="azS">احفظ وجرّب</button>'+(az.key?'<button class="btn sm ghost" id="azD">إلغاء</button>':'')+'</div>'}
+ c.innerHTML=h+'</div>';
+ c.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{S.set.cloudTab=b.dataset.t;renderCloud()});
+ const test=async()=>{toast('بجرّب الصوت…');S.tasks.forEach(t=>delete t.vclip);azCache.clear();try{const line='أهلاً'+(s.name?' يا '+s.name:'')+'، أنا سمسم، وده صوتي المصري. قولّي أفكّرك بإيه.';
+  if(NATIVE)await NP.playFile({path:await cloudFile(line)});else{const b=await cloudBlob(line);await new Audio(URL.createObjectURL(b)).play()}toast('اشتغل 👌');save()}catch(e){toast('مشتغلش: اتأكد من المفتاح والنت');}renderCloud()};
+ const q=id=>c.querySelector(id);
+ if(q('#elL'))q('#elL').onclick=async()=>{const key=q('#elK').value.trim();if(!key){toast('حط المفتاح الأول');return}toast('بجيب أصواتك…');
+  try{let js;if(NATIVE){const r=await NP.elVoices({key});js=JSON.parse(r.json)}else{const r=await fetch('https://api.elevenlabs.io/v1/voices',{headers:{'xi-api-key':key}});if(!r.ok)throw 0;js=await r.json()}
+   elList=(js.voices||[]).map(v=>{const L=v.labels||{};const eg=/egypt/i.test((L.accent||'')+' '+(L.description||'')+' '+v.name);return{id:v.voice_id,eg,label:(eg?'🇪🇬 ':'')+v.name+(L.accent?' — '+L.accent:'')}}).sort((a,b)=>b.eg-a.eg);
+   if(!elList.length){toast('مفيش أصوات في حسابك. ضيف صوت مصري من Voice Library الأول');return}
+   S.set.el={...(S.set.el||{}),key,voice:(S.set.el&&S.set.el.voice)||elList[0].id,vname:(S.set.el&&S.set.el.vname)||elList[0].label};S.set.el.voice=S.set.el.voice||elList[0].id;renderCloud();toast('لقيت '+AR(elList.length)+' صوت — اختار واحد ودوس احفظ وجرّب')}catch(e){toast('المفتاح مش شغال أو مفيش نت')}};
+ if(q('#elS'))q('#elS').onclick=()=>{const key=q('#elK').value.trim(),sel=q('#elV'),voice=sel.value;if(!key||!voice){toast('حط المفتاح واختار الصوت');return}
+  S.set.el={key,voice,vname:sel.options[sel.selectedIndex].text};save();test()};
+ if(q('#elD'))q('#elD').onclick=()=>{delete S.set.el;elList=null;S.tasks.forEach(t=>delete t.vclip);save();renderCloud();toast('رجعنا لصوت الموبايل')};
+ if(q('#azS'))q('#azS').onclick=()=>{const key=q('#azK').value.trim(),region=q('#azR').value.trim().toLowerCase();if(!key||!region){toast('اكتب المفتاح والـ region');return}S.set.az={key,region,voice:q('#azV').value};save();test()};
+ if(q('#azD'))q('#azD').onclick=()=>{delete S.set.az;S.tasks.forEach(t=>delete t.vclip);save();renderCloud();toast('رجعنا لصوت الموبايل')}}
 async function fillVoices(){const sel=$('#sVc');if(!sel)return;let list=[];
  if(NATIVE){try{const r=await NP.voices();list=(r.voices||[]).filter(v=>v.installed||v.network).map(v=>({id:v.name,label:(/EG/i.test(v.locale)?'🇪🇬 ':'')+v.locale+' — '+v.name.replace(/^ar-[a-z]+-x-/i,'')+(v.network?' (نت)':'')}))}catch(e){}}
  else if('speechSynthesis'in window)list=speechSynthesis.getVoices().filter(v=>/^ar/i.test(v.lang)).map(v=>({id:v.name,label:(/EG/i.test(v.lang)?'🇪🇬 ':'')+v.name}));

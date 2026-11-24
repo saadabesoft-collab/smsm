@@ -444,13 +444,43 @@ public class SmsmPlugin extends Plugin {
         if (c != null) c.resolve();
     }
 
-    /** Optional natural Egyptian voice from Microsoft Azure: saves the sentence as an mp3 (cached). */
+    /** List the voices in the user's ElevenLabs account. */
+    @PluginMethod
+    public void elVoices(PluginCall call) {
+        final String key = call.getString("key", "");
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL("https://api.elevenlabs.io/v1/voices").openConnection();
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(15000);
+                c.setRequestProperty("xi-api-key", key);
+                if (c.getResponseCode() != 200) {
+                    call.reject("http " + c.getResponseCode());
+                    return;
+                }
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                try (InputStream in = c.getInputStream()) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+                }
+                JSObject r = new JSObject();
+                r.put("json", bo.toString("UTF-8"));
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject("failed");
+            }
+        }).start();
+    }
+
+    /** Optional natural Egyptian voice (ElevenLabs or Microsoft Azure): saves the sentence as an mp3 (cached). */
     @PluginMethod
     public void cloudTts(PluginCall call) {
         final String text = call.getString("text", "");
         final String key = call.getString("key", "");
         final String region = call.getString("region", "").replaceAll("[^a-z0-9]", "");
-        final String voice = call.getString("voice", "ar-EG-SalmaNeural").replaceAll("[^A-Za-z0-9-]", "");
+        final String voice = call.getString("voice", "ar-EG-SalmaNeural").replaceAll("[^A-Za-z0-9_-]", "");
+        final String provider = call.getString("provider", "azure");
         final String name = call.getString("name", "c" + System.currentTimeMillis() + ".mp3").replaceAll("[^A-Za-z0-9._-]", "_");
         final float rate = call.getFloat("rate", 1f);
         new Thread(() -> {
@@ -459,22 +489,41 @@ public class SmsmPlugin extends Plugin {
                 if (!dir.exists()) dir.mkdirs();
                 File f = new File(dir, name);
                 if (!f.exists() || f.length() < 500) {
-                    String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-                    int pct = Math.round((rate - 1f) * 100);
-                    String ssml = "<speak version='1.0' xml:lang='ar-EG'><voice name='" + voice + "'><prosody rate='" + pct + "%'>" + safe + "</prosody></voice></speak>";
-                    HttpURLConnection c = (HttpURLConnection) new URL("https://" + region + ".tts.speech.microsoft.com/cognitiveservices/v1").openConnection();
+                    HttpURLConnection c;
+                    byte[] body;
+                    if ("eleven".equals(provider)) {
+                        c = (HttpURLConnection) new URL("https://api.elevenlabs.io/v1/text-to-speech/" + voice + "?output_format=mp3_44100_64").openConnection();
+                        c.setRequestProperty("xi-api-key", key);
+                        c.setRequestProperty("Content-Type", "application/json");
+                        c.setRequestProperty("Accept", "audio/mpeg");
+                        JSONObject vs = new JSONObject();
+                        vs.put("stability", 0.5);
+                        vs.put("similarity_boost", 0.75);
+                        vs.put("speed", Math.min(1.2, Math.max(0.7, rate)));
+                        JSONObject j = new JSONObject();
+                        j.put("text", text);
+                        j.put("model_id", "eleven_multilingual_v2");
+                        j.put("voice_settings", vs);
+                        body = j.toString().getBytes("UTF-8");
+                    } else {
+                        String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+                        int pct = Math.round((rate - 1f) * 100);
+                        String ssml = "<speak version='1.0' xml:lang='ar-EG'><voice name='" + voice + "'><prosody rate='" + pct + "%'>" + safe + "</prosody></voice></speak>";
+                        c = (HttpURLConnection) new URL("https://" + region + ".tts.speech.microsoft.com/cognitiveservices/v1").openConnection();
+                        c.setRequestProperty("Ocp-Apim-Subscription-Key", key);
+                        c.setRequestProperty("Content-Type", "application/ssml+xml");
+                        c.setRequestProperty("X-Microsoft-OutputFormat", "audio-24khz-48kbitrate-mono-mp3");
+                        body = ssml.getBytes("UTF-8");
+                    }
                     c.setRequestMethod("POST");
                     c.setConnectTimeout(8000);
-                    c.setReadTimeout(15000);
+                    c.setReadTimeout(20000);
                     c.setDoOutput(true);
-                    c.setRequestProperty("Ocp-Apim-Subscription-Key", key);
-                    c.setRequestProperty("Content-Type", "application/ssml+xml");
-                    c.setRequestProperty("X-Microsoft-OutputFormat", "audio-24khz-48kbitrate-mono-mp3");
                     c.setRequestProperty("User-Agent", "smsm");
-                    try (OutputStream o = c.getOutputStream()) { o.write(ssml.getBytes("UTF-8")); }
+                    try (OutputStream o = c.getOutputStream()) { o.write(body); }
                     int code = c.getResponseCode();
                     if (code != 200) {
-                        call.reject("azure " + code);
+                        call.reject("tts " + code);
                         return;
                     }
                     try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(f)) {
