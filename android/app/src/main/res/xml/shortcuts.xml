@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="talk" android:enabled="true" android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/sc_talk" android:shortcutLongLabel="@string/sc_talk">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.besoft.smsm" android:targetClass="com.besoft.smsm.MainActivity" android:data="smsm://talk" />
+    </shortcut>
+    <shortcut android:shortcutId="note" android:enabled="true" android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/sc_note" android:shortcutLongLabel="@string/sc_note">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.besoft.smsm" android:targetClass="com.besoft.smsm.MainActivity" android:data="smsm://note" />
+    </shortcut>
+</shortcuts>

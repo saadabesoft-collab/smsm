@@ -1,0 +1,10 @@
+const fs=require('fs'),path=require('path');
+const W=p=>path.join(__dirname,'..','web',p),D=p=>path.join(__dirname,'..','dist',p);
+fs.rmSync(D(''),{recursive:true,force:true});fs.mkdirSync(D('fonts'),{recursive:true});
+let html=fs.readFileSync(W('app.html'),'utf8');
+const parse=fs.readFileSync(W('parse.js'),'utf8').replace(/if\(typeof module[^\n]*/,'');
+html=html.replace('<script>/*PARSE*/</script>',()=>'<script>'+parse+'</script>').replace('<script>/*APP*/</script>',()=>'<script>'+fs.readFileSync(W('app.js'),'utf8')+'</script>');
+fs.writeFileSync(D('index.html'),html);
+for(const f of ['icon.svg','icon-192.png','icon-512.png','manifest.webmanifest','sw.js'])if(fs.existsSync(W(f)))fs.copyFileSync(W(f),D(f));
+for(const f of fs.readdirSync(W('fonts')))fs.copyFileSync(W('fonts/'+f),D('fonts/'+f));
+console.log('built',(html.length/1024).toFixed(0)+'KB');

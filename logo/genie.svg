@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2b2a6b"/><stop offset="1" stop-color="#4a3f9e"/></linearGradient>
+ <radialGradient id="glow" cx=".5" cy=".42" r=".5"><stop offset="0" stop-color="#9fe8e0" stop-opacity=".35"/><stop offset="1" stop-color="#9fe8e0" stop-opacity="0"/></radialGradient>
+ <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a99bff"/><stop offset="1" stop-color="#7a68f0"/></linearGradient>
+ <linearGradient id="tail" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8f80fb"/><stop offset="1" stop-color="#5fd6c8"/></linearGradient>
+ <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#e6a52e"/></linearGradient>
+</defs>
+<rect width="512" height="512" rx="116" fill="url(#bg)"/>
+<rect width="512" height="512" rx="116" fill="url(#glow)"/>
+<g fill="#fff" opacity=".8"><circle cx="96" cy="110" r="3"/><circle cx="420" cy="92" r="2.5"/><circle cx="440" cy="190" r="2"/><circle cx="70" cy="230" r="2"/><path d="M402 140l4 10 10 4-10 4-4 10-4-10-10-4 10-4z"/><path d="M118 168l3 7 7 3-7 3-3 7-3-7-7-3 7-3z"/></g>
+<!-- tail of smoke from lamp to body -->
+<path d="M300 408c40-20 30-60-10-70-40-10-70-40-40-78" fill="none" stroke="url(#tail)" stroke-width="44" stroke-linecap="round"/>
+<path d="M300 408c40-20 30-60-10-70-40-10-70-40-40-78" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="12" stroke-linecap="round" transform="translate(-8 -4)"/>
+<!-- body -->
+<path d="M196 300c-6-56 26-96 64-96s70 40 64 96c-14 26-42 40-64 40s-50-14-64-40z" fill="url(#body)"/>
+<!-- arms -->
+<path d="M206 262c-30-6-52-30-58-56" stroke="#8f80fb" stroke-width="22" stroke-linecap="round" fill="none"/>
+<circle cx="146" cy="200" r="16" fill="#a99bff"/>
+<path d="M141 188v-22" stroke="#a99bff" stroke-width="10" stroke-linecap="round"/>
+<path d="M314 262c22 8 36 26 38 46" stroke="#8f80fb" stroke-width="22" stroke-linecap="round" fill="none"/>
+<circle cx="352" cy="312" r="15" fill="#a99bff"/>
+<!-- head -->
+<circle cx="260" cy="180" r="66" fill="url(#body)"/>
+<path d="M200 150l-16-34 34 18zM320 150l16-34-34 18z" fill="#7a68f0"/>
+<!-- turban -->
+<path d="M200 156c4-44 34-66 60-66s56 22 60 66c-18-12-38-18-60-18s-42 6-60 18z" fill="#3cc6b6"/>
+<path d="M208 140c16-10 34-14 52-14s36 4 52 14" stroke="#2aa597" stroke-width="6" fill="none"/>
+<circle cx="260" cy="118" r="12" fill="url(#gold)"/><circle cx="260" cy="118" r="5" fill="#e8455f"/>
+<!-- face -->
+<ellipse cx="236" cy="186" rx="15" ry="18" fill="#fff"/><ellipse cx="284" cy="186" rx="15" ry="18" fill="#fff"/>
+<circle cx="239" cy="190" r="8" fill="#22204d"/><circle cx="281" cy="190" r="8" fill="#22204d"/>
+<circle cx="242" cy="186" r="3" fill="#fff"/><circle cx="284" cy="186" r="3" fill="#fff"/>
+<path d="M240 214c12 14 28 14 40 0" stroke="#22204d" stroke-width="6" stroke-linecap="round" fill="none"/>
+<ellipse cx="218" cy="210" rx="10" ry="6" fill="#ff9fb6" opacity=".6"/><ellipse cx="302" cy="210" rx="10" ry="6" fill="#ff9fb6" opacity=".6"/>
+<!-- lamp -->
+<path d="M196 424c0-24 40-40 92-40s92 16 92 40z" fill="url(#gold)"/>
+<path d="M370 410c26-4 44-18 54-34-14 4-30 4-44 2" fill="url(#gold)"/>
+<path d="M200 418c-18-4-28-18-26-32 12 10 22 14 34 14" fill="none" stroke="#e6a52e" stroke-width="10" stroke-linecap="round"/>
+<ellipse cx="288" cy="426" rx="96" ry="14" fill="#d18f1f"/>
+<rect x="250" y="436" width="76" height="16" rx="6" fill="#d18f1f"/>
+<ellipse cx="288" cy="384" rx="22" ry="7" fill="#fff1c2"/>
+</svg>
