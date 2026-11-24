@@ -25,6 +25,21 @@ import org.json.JSONObject;
 /** The pop-up card shown over other apps and over the lock screen: "بفكرك بـ…" with تم / أجّل. */
 public class ReminderActivity extends Activity {
     private JSONObject item;
+    private android.media.MediaPlayer notePlayer;
+
+    private void releaseNote() {
+        if (notePlayer != null) {
+            try { notePlayer.stop(); } catch (Exception ignored) {}
+            try { notePlayer.release(); } catch (Exception ignored) {}
+            notePlayer = null;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        releaseNote();
+        super.onDestroy();
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -95,6 +110,7 @@ public class ReminderActivity extends Activity {
     }
 
     private void render(Intent intent) {
+        releaseNote();
         try {
             item = new JSONObject(intent.getStringExtra("item"));
         } catch (Exception e) {
@@ -168,9 +184,35 @@ public class ReminderActivity extends Activity {
         int sn = item.optInt("snoozed", 0);
         if (sn > 0) when = when + (when.length() > 0 ? " · " : "") + "اتأجل " + sn + " مرة";
         if (when.length() > 0) body.addView(text(when, 14, 0xFF5D7290, false), full(4));
-        if ("note".equals(item.optString("sound"))) {
-            TextView note = text("🎙 بيشغّل الفويس نوت بتاعتك", 14, 0xFFC98F0B, true);
-            body.addView(note, full(8));
+        final String noteFile = item.optString("noteFile");
+        if (noteFile.length() > 0 && new java.io.File(noteFile).exists()) {
+            final Button play = button("▶ اسمع الفويس نوت", 0xFFFDF1CF, 0xFF5A3D00, 16);
+            body.addView(play, full(14));
+            play.setOnClickListener(v -> {
+                if (notePlayer != null) {
+                    releaseNote();
+                    play.setText("▶ اسمع الفويس نوت");
+                    return;
+                }
+                stopSound();
+                try {
+                    notePlayer = new android.media.MediaPlayer();
+                    notePlayer.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                    notePlayer.setDataSource(noteFile);
+                    notePlayer.setOnCompletionListener(mp -> {
+                        releaseNote();
+                        play.setText("▶ اسمعها تاني");
+                    });
+                    notePlayer.prepare();
+                    notePlayer.start();
+                    play.setText("■ وقّف");
+                } catch (Exception e) {
+                    releaseNote();
+                    play.setText("الفويس نوت مش موجودة");
+                }
+            });
         }
 
         Button done = button("تم ✓", 0xFF2F7FE0, Color.WHITE, 20);

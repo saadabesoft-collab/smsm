@@ -61,7 +61,7 @@ async function speak(text,force){if((!S.set.voice&&!force)||!text)return;if(NATI
  if(!('speechSynthesis'in window))return;
  await new Promise(res=>{try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=arVoice?arVoice.lang:'ar-EG';if(arVoice)u.voice=arVoice;u.rate=S.set.rate;u.onend=u.onerror=()=>res();speechSynthesis.speak(u);setTimeout(res,Math.min(15000,1500+text.length*120))}catch(e){res()}})}
 /* the sentence said when a reminder rings */
-const remLine=t=>(S.set.name?'يا '+S.set.name+'، ':'')+(t.note?'عندك فويس نوت'+(t.text&&t.text!=='فويس نوت'?'، '+t.text:''):'بفكرك: '+t.text);
+const remLine=t=>(S.set.name?'يا '+S.set.name+'، ':'')+(t.note&&(!t.text||t.text==='فويس نوت')?'عندك فويس نوت، افتحها واسمعها':'بفكرك: '+t.text);
 /* with the Azure voice on, prepare the reminder sentence as a file so the phone can play it while the app is closed */
 let clipBusy=false;
 async function ensureClips(){if(!NATIVE||!azOn()||clipBusy)return;clipBusy=true;let got=false;
@@ -246,11 +246,11 @@ function engine(){if(popT&&$('#pop').classList.contains('on')){const t=findT(pop
  const now=Date.now();const due=S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at<=now&&t.at>now-12*3600e3&&(!t.ringAt||now-t.ringAt>=S.set.repeat*6e4)).sort((a,b)=>a.at-b.at)[0];
  if(due){due.ringAt=now;save();showPop(due);ring(due)}}
 function ring(t){const msg=remLine(t);if(document.hidden&&'Notification'in window&&Notification.permission==='granted'){try{const n=new Notification('سمسم بيفكرك',{body:t.text,icon:'icon-192.png',tag:t.id,requireInteraction:true});n.onclick=()=>{window.focus();n.close()}}catch(e){}}
- if(t.note){speak(msg).then(()=>{const el=$('#popAud');if(el)playNote(t,el)})}else speak(msg)}
+ speak(msg)}
 function showPop(t){popT=t.id;const late=Math.round((Date.now()-t.at)/6e4);
- $('#pop').innerHTML='<div class="pc"><div class="ph"><svg viewBox="0 0 512 512"><use href="#genie"/></svg><p>سمسم بيفكرك</p></div><div class="pb"><div class="muted">بفكرك بـ</div><h2>'+esc(t.text)+'</h2><div class="tl">'+(t.dayOnly?'النهارده':showTime(t.at)+' '+ampm(t.at))+(late>1?' — من '+AR(late)+' دقيقة':'')+(t.snz?' · اتأجل '+AR(t.snz)+' مرة':'')+'</div><div id="popAud"></div>'+
+ $('#pop').innerHTML='<div class="pc"><div class="ph"><svg viewBox="0 0 512 512"><use href="#genie"/></svg><p>سمسم بيفكرك</p></div><div class="pb"><div class="muted">بفكرك بـ</div><h2>'+esc(t.text)+'</h2><div class="tl">'+(t.dayOnly?'النهارده':showTime(t.at)+' '+ampm(t.at))+(late>1?' — من '+AR(late)+' دقيقة':'')+(t.snz?' · اتأجل '+AR(t.snz)+' مرة':'')+'</div>'+(t.note?'<button class="btn ghost" id="pPlay" style="margin-top:12px;width:100%">▶ اسمع الفويس نوت</button>':'')+'<div id="popAud"></div>'+
  '<div class="pact"><button class="btn ok" id="pOk">تم</button><div class="muted">أو أجّل:</div><div class="snz">'+S.set.snooze.map(m=>'<button data-m="'+m+'">'+minLabel(m)+'</button>').join('')+'</div></div></div></div>';
- $('#pop').classList.add('on');if(t.note)playNote(t,$('#popAud'));
+ $('#pop').classList.add('on');if($('#pPlay'))$('#pPlay').onclick=()=>{if('speechSynthesis'in window)speechSynthesis.cancel();$('#pPlay').remove();playNote(t,$('#popAud'))};
  $('#pOk').onclick=()=>{markDone(t);hidePop();speak('عاش يا بطل');};
  $('#pop').querySelector('.snz').onclick=e=>{const b=e.target.closest('[data-m]');if(!b)return;snooze(t,+b.dataset.m);hidePop();toast('هفكرك تاني بعد '+minLabel(+b.dataset.m))}}
 function hidePop(){$('#pop').classList.remove('on');popT=null;if(curAudio)curAudio.pause();if('speechSynthesis'in window)speechSynthesis.cancel()}
@@ -260,7 +260,7 @@ let unlocked=false;function unlockAudio(){if(unlocked)return;unlocked=true;try{c
 function nsched(){if(!NATIVE)return;setTimeout(ensureClips,50);const now=Date.now(),items=[];
  S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at>now-12*3600e3).sort((a,b)=>a.at-b.at).slice(0,120).forEach(t=>{
   items.push({id:hid(t.id),key:okey(t),task:t.id,time:Math.max(t.at,now+3000),exp:t.at+12*3600e3,title:'سمسم بيفكرك',body:t.text,persistent:true,repeat:S.set.repeat,
-   sound:t.notePath?'note':(S.set.voice?'tts':'none'),file:t.notePath||'',speech:egSay(remLine(t)),speechFile:(t.vclip&&t.vclip.line===egSay(remLine(t)))?t.vclip.path:'',voice:S.set.voiceName||'',
+   sound:S.set.voice?'tts':'none',file:'',noteFile:t.notePath||'',speech:egSay(remLine(t)),speechFile:(t.vclip&&t.vclip.line===egSay(remLine(t)))?t.vclip.path:'',voice:S.set.voiceName||'',
    when:t.dayOnly?'النهارده':showTime(t.at)+' '+ampm(t.at),snooze:S.set.snooze,snDef:S.set.snDef,rate:S.set.rate,kind:'task'})});
  // day close
  const b=boundary(addDays(fromDk(logicalDay()),1));const left=S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at<b.getTime()).length;
