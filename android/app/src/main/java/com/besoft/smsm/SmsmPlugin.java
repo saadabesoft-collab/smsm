@@ -466,6 +466,52 @@ public class SmsmPlugin extends Plugin {
         if (c != null) c.resolve();
     }
 
+    /** Plain HTTPS POST/GET for the AI brain (no browser CORS limits). */
+    @PluginMethod
+    public void http(PluginCall call) {
+        final String url = call.getString("url", "");
+        final String method = call.getString("method", "POST");
+        final String body = call.getString("body", null);
+        final JSObject headers = call.getObject("headers", new JSObject());
+        if (!url.startsWith("https://")) {
+            call.reject("https only");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setRequestMethod(method);
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(90000);
+                java.util.Iterator<String> it = headers.keys();
+                while (it.hasNext()) {
+                    String k = it.next();
+                    c.setRequestProperty(k, headers.getString(k));
+                }
+                if (body != null) {
+                    c.setDoOutput(true);
+                    try (OutputStream o = c.getOutputStream()) { o.write(body.getBytes("UTF-8")); }
+                }
+                int code = c.getResponseCode();
+                InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                if (in != null) {
+                    try (InputStream i2 = in) {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = i2.read(buf)) > 0) bo.write(buf, 0, n);
+                    }
+                }
+                JSObject r = new JSObject();
+                r.put("status", code);
+                r.put("body", bo.toString("UTF-8"));
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject("network");
+            }
+        }).start();
+    }
+
     /** List the voices in the user's ElevenLabs account. */
     @PluginMethod
     public void elVoices(PluginCall call) {

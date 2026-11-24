@@ -139,6 +139,26 @@ audio{width:100%;margin-top:10px}
 #splash .bs{position:absolute;bottom:calc(26px + env(safe-area-inset-bottom));font-size:13px;opacity:.7;letter-spacing:.08em}
 #splash.out{opacity:0;pointer-events:none}
 .brand{text-align:center;color:var(--muted);font-size:13px;padding:22px 0 8px}.brand b{font-family:"Reem Kufi";color:var(--pri)}
+
+/* chat with سمسم */
+#v-chat{position:fixed;inset:0;z-index:60;background:var(--bg);display:none;flex-direction:column}
+#v-chat.on{display:flex}
+.chh{background:linear-gradient(160deg,var(--night),var(--night2));color:#fff;padding:calc(12px + env(safe-area-inset-top)) 12px 12px;display:flex;align-items:center;gap:10px}
+.chh svg.g{width:42px;height:42px;border-radius:12px;flex:none}.chh b{font-family:"Reem Kufi";font-size:20px;display:block;line-height:1.1}.chh span{font-size:12px;opacity:.85}
+.chh .x{width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,.18);display:grid;place-items:center;color:#fff;font-size:20px}
+#chatLog{flex:1;overflow-y:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:8px}
+.bub{max-width:82%;padding:10px 14px;border-radius:18px;line-height:1.55;font-size:16px;white-space:pre-wrap}
+.bub.me{align-self:flex-start;background:var(--pri);color:#fff;border-end-start-radius:6px}
+.bub.ai{align-self:flex-end;background:var(--card);border:1px solid var(--line);border-end-end-radius:6px}
+.bub.sys{align-self:center;background:transparent;color:var(--muted);font-size:13px;padding:2px 8px}
+.bub.act{align-self:flex-end;background:color-mix(in srgb,var(--gold) 16%,var(--card));border:1px solid color-mix(in srgb,var(--gold) 40%,transparent);font-size:14px}
+.chb{display:flex;gap:8px;align-items:center;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line)}
+.chb input{flex:1;background:var(--soft);border:1px solid var(--line);border-radius:22px;padding:10px 16px;min-height:48px;font-size:16px}
+.chb .mic2{width:56px;height:56px;border-radius:50%;background:linear-gradient(140deg,var(--pri),var(--pri2));display:grid;place-items:center;flex:none;box-shadow:0 6px 16px rgba(47,127,224,.4)}
+.chb .mic2 svg{width:26px;height:26px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round}
+.chb .mic2.live{animation:pulse 1.1s infinite;background:linear-gradient(140deg,var(--gold),var(--gold2))}
+.chb .snd{width:48px;height:48px;border-radius:50%;background:var(--soft);display:grid;place-items:center;flex:none;font-size:20px}
+.typing{display:inline-flex;gap:4px}.typing i{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -189,6 +209,11 @@ audio{width:100%;margin-top:10px}
  <div class="wrap" id="setBody"></div>
 </section>
 
+<section id="v-chat" aria-label="محادثة مع سمسم">
+ <div class="chh"><svg class="g" viewBox="0 0 512 512"><use href="#genie"/></svg><div style="flex:1"><b>سمسم</b><span id="chatSt">اتكلم معايا عادي</span></div><button class="x" id="chatX" aria-label="قفل">✕</button></div>
+ <div id="chatLog"></div>
+ <form class="chb" id="chatF"><button type="button" class="mic2" id="chatMic" aria-label="اتكلم"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><input id="chatI" placeholder="اكتب لسمسم…" autocomplete="off"><button class="snd" aria-label="ابعت" style="transform:scaleX(-1)">➤</button></form>
+</section>
 <nav id="nav">
  <button data-v="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9H3z"/><path d="M9 20v-6h6v6"/></svg>الرئيسية</button>
  <button data-v="cal"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>النتيجة</button>
