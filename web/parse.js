@@ -55,7 +55,7 @@ function smParse(text,nowMs){const now=new Date(nowMs||Date.now());let s=' '+smT
  let rest=s.replace(/\s(?:يا\s+)?سمسم\s/g,' ').replace(/\s(?:لو سمحت|من فضلك|معلش|يا عم|بقي|بقى)\s/g,' ');
  rest=rest.replace(/^\s*(?:و\s*)?(?:ممكن\s+)?(?:تفكرني|فكرني|فكرنى|ذكرني|ذكرنى|نبهني|نبهنى|افتكرلي|سجل|سجلي|اكتب|حط|خليني افتكر|عايزك تفكرني|عاوزك تفكرني)\s+/,' ');
  rest=rest.replace(/^\s*(?:اني|ان|علشان|عشان|لازم|ب\s)\s*/,' ').replace(/^\s*ب(?=\S{3,})/,' ').replace(/\s+/g,' ').trim();
- rest=rest.replace(/^(?:اني|ان|عشان|علشان)\s+/,'').replace(/\s(?:و|في|علي|الساعه)$/,'').trim();
+ rest=rest.replace(/^(?:افتكر|متنساش|ماتنساش|عايز|عاوز|محتاج)\s+(?=\S+\s+\S)/,'').replace(/^(?:اني|ان|عشان|علشان)\s+/,'').replace(/\s(?:و|في|علي|الساعه)$/,'').trim();
  const textOut=smRestoreText(text,rest);
  return{at:at?at.getTime():null,text:textOut,rep,dayOnly,hasTime:hh!=null||rel!=null}}
 function smPer(p){return/الصبح|صباحا|بدري|الفجر|^ص$/.test(p)?'am':/الضهر|الظهر/.test(p)?'noon':'pm'}

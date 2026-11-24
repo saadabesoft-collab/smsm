@@ -39,14 +39,34 @@ function speakWhen(t){const w=sayWhen(t);return t.rep==='d'?'كل يوم '+sayTi
 function hijri(d){try{return new Intl.DateTimeFormat('ar-EG-u-ca-islamic-umalqura-nu-arab',{day:'numeric',month:'long',year:'numeric'}).format(d).replace(/[٬,]/g,'').replace(' هـ','')+' هـ'}catch(e){return''}}
 
 /* ---------- speech out ---------- */
+/* Egyptian pronunciation hints for the speech engine */
+const EG=[[/تم التسجيل/g,'تمام، اتسجِّلِت'],[/هفكرك/g,'هَفَكَّرَك'],[/بفكرك/g,'بَفَكَّرَك'],[/أفكرك/g,'أفَكَّرَك'],[/الصبح/g,'الصُّبح'],[/الضهر/g,'الضُّهر'],[/العصر/g,'العَصْر'],[/بالليل/g,'باللِّيل'],[/المغرب/g,'المَغْرِب'],
+ [/ونص/g,'ونُصّ'],[/نص ساعة/g,'نُصّ ساعة'],[/ربع/g,'رُبع'],[/بكرة/g,'بُكْرة'],[/النهارده/g,'النَّهارده'],[/دقايق/g,'دَقايِق'],[/عندك/g,'عَنْدَك'],[/خلصت/g,'خَلَّصْت'],[/خلص /g,'خِلِص '],[/مفهمتش/g,'مَفهِمتِش'],[/إمتى/g,'إمْتَى'],[/حداشر/g,'حِداشَر'],[/اتناشر/g,'اتْناشَر'],[/تلاتة/g,'تَلاتة'],[/تمانية/g,'تَمانية']];
+const egSay=t=>EG.reduce((x,[r,v])=>x.replace(r,v),String(t));
 let arVoice=null;
-function pickVoice(){if(!('speechSynthesis'in window))return;const v=speechSynthesis.getVoices();arVoice=v.find(x=>/^ar[-_]EG/i.test(x.lang))||v.find(x=>/^ar/i.test(x.lang))||null}
+function pickVoice(){if(!('speechSynthesis'in window))return;const v=speechSynthesis.getVoices().filter(x=>/^ar/i.test(x.lang));
+ arVoice=v.find(x=>x.name===S.set.voiceName)||v.find(x=>/EG/i.test(x.lang)&&/Natural|Online|Salma|Shakir/i.test(x.name))||v.find(x=>/EG/i.test(x.lang))||v.find(x=>/Natural|Online|Google/i.test(x.name))||v[0]||null}
 if('speechSynthesis'in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
-function speak(text){return new Promise(res=>{if(!S.set.voice||!text)return res();
- if(NATIVE){NP.speak({text,rate:S.set.rate}).then(res,res);return}
- if(!('speechSynthesis'in window))return res();
- try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=arVoice?arVoice.lang:'ar-EG';if(arVoice)u.voice=arVoice;u.rate=S.set.rate;u.onend=u.onerror=()=>res();speechSynthesis.speak(u);setTimeout(res,Math.min(15000,1500+text.length*120))}catch(e){res()}})}
-
+const azOn=()=>!!(S.set.az&&S.set.az.key&&S.set.az.region);
+const azName=t=>'c'+hid((S.set.az.voice||'')+'|'+S.set.rate+'|'+t)+'.mp3';
+const azCache=new Map();
+async function azBlob(text){const k=azName(text);if(azCache.has(k))return azCache.get(k);const a=S.set.az;const x=text.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+ const r=await fetch('https://'+a.region+'.tts.speech.microsoft.com/cognitiveservices/v1',{method:'POST',headers:{'Ocp-Apim-Subscription-Key':a.key,'Content-Type':'application/ssml+xml','X-Microsoft-OutputFormat':'audio-24khz-48kbitrate-mono-mp3'},
+  body:"<speak version='1.0' xml:lang='ar-EG'><voice name='"+(a.voice||'ar-EG-SalmaNeural')+"'><prosody rate='"+Math.round((S.set.rate-1)*100)+"%'>"+x+"</prosody></voice></speak>"});
+ if(!r.ok)throw new Error('az '+r.status);const b=await r.blob();azCache.set(k,b);return b}
+async function azFile(text){const a=S.set.az;const r=await NP.cloudTts({text,key:a.key,region:a.region,voice:a.voice||'ar-EG-SalmaNeural',rate:S.set.rate,name:azName(text)});return r.path}
+async function speak(text,force){if((!S.set.voice&&!force)||!text)return;text=egSay(text);
+ if(azOn()){try{if(NATIVE){const f=await azFile(text);await NP.playFile({path:f});return}const b=await azBlob(text);await new Promise(res=>{const a=new Audio(URL.createObjectURL(b));a.onended=a.onerror=res;a.play().catch(res)});return}catch(e){}}
+ if(NATIVE){try{await NP.speak({text,rate:S.set.rate,voice:S.set.voiceName||''})}catch(e){}return}
+ if(!('speechSynthesis'in window))return;
+ await new Promise(res=>{try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=arVoice?arVoice.lang:'ar-EG';if(arVoice)u.voice=arVoice;u.rate=S.set.rate;u.onend=u.onerror=()=>res();speechSynthesis.speak(u);setTimeout(res,Math.min(15000,1500+text.length*120))}catch(e){res()}})}
+/* the sentence said when a reminder rings */
+const remLine=t=>(S.set.name?'يا '+S.set.name+'، ':'')+(t.note?'عندك فويس نوت'+(t.text&&t.text!=='فويس نوت'?'، '+t.text:''):'بفكرك: '+t.text);
+/* with the Azure voice on, prepare the reminder sentence as a file so the phone can play it while the app is closed */
+let clipBusy=false;
+async function ensureClips(){if(!NATIVE||!azOn()||clipBusy)return;clipBusy=true;let got=false;
+ try{for(const t of S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at>Date.now()-36e5&&t.at<Date.now()+7*864e5).slice(0,40)){const line=egSay(remLine(t));if(t.vclip&&t.vclip.line===line)continue;
+  try{const path=await azFile(line);t.vclip={line,path};got=true}catch(e){break}}}finally{clipBusy=false}if(got){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}nsched()}}
 /* ---------- speech in ---------- */
 const WebSR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const canListen=()=>NATIVE||!!WebSR;
@@ -87,8 +107,8 @@ async function converse(first,woke){
  if(!p.text){await speak('أفكرك بإيه؟');const t2=await listen('أفكرك بإيه؟');if(!t2){heard('');return}const q=smParse(t2);p.text=q.text||t2;if(!p.at&&q.at){p.at=q.at;p.hasTime=q.hasTime;p.dayOnly=q.dayOnly}}
  if(!p.at){await speak('إمتى أفكرك؟');const t3=await listen('إمتى؟ مثلاً: بعد ساعة، بكرة الساعة ٥');const q=t3?smParse(t3):null;if(!q||!q.at){heard('<b>سمسم:</b> ملحقتش أفهم الوقت. قولها تاني أو اكتبها');await speak('معلش مفهمتش الوقت، قولها تاني');return}p.at=q.at;p.dayOnly=q.dayOnly;if(q.rep)p.rep=q.rep}
  const t=addTask({text:p.text,at:p.at,dayOnly:p.dayOnly,rep:p.rep,src:'voice'});
- const msg='تم التسجيل. هفكرك '+speakWhen(t)+' ب'+t.text;
- heard('<b>سمسم:</b> '+esc('تم التسجيل هفكرك '+speakWhen(t)));
+ const msg='تم التسجيل. هفكرك '+speakWhen(t)+'، '+t.text;
+ heard('<b>سمسم:</b> '+esc('تمام، اتسجلت. هفكرك '+speakWhen(t)));
  if(S.set.confirm)await speak(msg);}
 
 function addTask(o){const t={id:uid(),text:o.text.trim()||'تذكير',at:o.at,dayOnly:!!o.dayOnly,rep:o.rep||null,note:o.note||null,notePath:o.notePath||null,done:false,snz:0,src:o.src||'text',created:Date.now()};S.tasks.push(t);save();render();return t}
@@ -117,7 +137,7 @@ const findT=id=>S.tasks.find(t=>t.id===id);
 function greet(){const H=new Date().getHours();const g=H<12&&H>=4?'صباح الخير':'مساء الخير';return g+(S.set.name?' يا '+S.set.name:'')}
 function tick(){const n=new Date();const H=n.getHours();$('#clk').innerHTML=AR(H%12||12)+':'+arD(pad(n.getMinutes()))+'<small>'+arD(pad(n.getSeconds()))+' '+(H<12?'ص':'م')+'</small>';
  $('#dte').textContent=WD[n.getDay()]+' '+AR(n.getDate())+' '+MONTHS[n.getMonth()]+' '+AR(n.getFullYear());$('#hdt').textContent=hijri(n);$('#greet').textContent=greet();
- dayClose();if(!NATIVE)engine();if(n.getSeconds()===0)render()}
+ dayClose();if(!NATIVE)engine();if(n.getSeconds()===0){render();applyTheme()}}
 function taskRow(t){const late=!t.done&&t.at<Date.now();const meta=[];if(t.note)meta.push('🎙 فويس نوت');if(t.rep)meta.push(t.rep==='d'?'🔁 كل يوم':'🔁 كل أسبوع');if(t.snz)meta.push('اتأجل '+AR(t.snz)+' مرة');if(t.moved)meta.push('متنقّلة');
  return '<div class="task'+(t.done?' done':'')+(late?' late':'')+'" data-id="'+t.id+'"><button class="ck" data-a="done" aria-label="تم"></button><div class="tm">'+(t.dayOnly?'طول<small>اليوم</small>':showTime(t.at)+'<small>'+ampm(t.at)+'</small>')+'</div><div class="tx" data-a="edit"><b>'+esc(t.text)+'</b>'+(meta.length?'<small>'+meta.join(' · ')+'</small>':'')+'</div>'+
  (t.note?'<button class="ib" data-a="play" aria-label="شغّل"><svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg></button>':'')+
@@ -158,31 +178,52 @@ async function idbPut(k,v){const d=await idb();return new Promise(r=>{const tx=d
 async function idbGet(k){const d=await idb();return new Promise(r=>{const q=d.transaction('notes').objectStore('notes').get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)})}
 async function idbDel(k){try{const d=await idb();d.transaction('notes','readwrite').objectStore('notes').delete(k)}catch(e){}}
 let curAudio=null;
-async function playNote(t,el){const b=await idbGet(t.note);if(!b){toast('الفويس نوت مش موجودة');return}if(curAudio){curAudio.pause()}const u=URL.createObjectURL(b);
+async function playNote(t,el){if(curAudio){try{curAudio.pause()}catch(e){}}
+ if(NATIVE&&t.notePath&&(!t.note||t.note==='file')){NP.playFile({path:t.notePath}).catch(()=>toast('الفويس نوت مش موجودة'));return}
+ const b=await idbGet(t.note);if(!b){if(NATIVE&&t.notePath){NP.playFile({path:t.notePath}).catch(()=>{});return}toast('الفويس نوت مش موجودة');return}const u=URL.createObjectURL(b);
  if(el){el.innerHTML='<audio controls autoplay src="'+u+'"></audio>';curAudio=el.querySelector('audio');curAudio.play().catch(()=>{})}else{curAudio=new Audio(u);curAudio.play().catch(()=>toast('دوس تاني عشان يشتغل'))}}
-let rec=null,recChunks=[],recT=0,recTimer=null,recStream=null;
+let rec=null,recChunks=[],recT=0,recTimer=null,recStream=null,recSR=null,recText='';
 $('#noteBtn').onclick=()=>noteFlow();
+/* voice note: record + understand the words, so "فكرني أشتري عيش كمان ساعة" sets the time by itself */
 async function noteFlow(dayKey){unlockAudio();
+ if(NATIVE){let r=null;try{r=await NP.listenNote({language:'ar-EG',prompt:'قول الفويس نوت… مثلاً: فكرني أشتري عيش كمان ساعة'})}catch(e){r=null}
+  if(r){if(r.cancel)return;if(!r.text&&!r.path){toast('مسمعتش حاجة، جرّب تاني');return}return noteResult(r.text||'',null,r.path||null,dayKey)}}
  if(!navigator.mediaDevices||!window.MediaRecorder){toast('الجهاز ده مش بيدعم التسجيل');return}
  try{recStream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){toast('محتاج إذن الميكروفون عشان أسجّل');return}
  stopWake();const mt=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||'';
- rec=new MediaRecorder(recStream,mt?{mimeType:mt}:undefined);recChunks=[];rec.ondataavailable=e=>{if(e.data.size)recChunks.push(e.data)};
- rec.onstop=()=>{recStream.getTracks().forEach(x=>x.stop());clearInterval(recTimer);if(rec&&rec._cancel){rec=null;return}const blob=new Blob(recChunks,{type:rec.mimeType||'audio/webm'});rec=null;noteWhen(blob,dayKey)};
- rec.start();recT=0;openSheet('<h2>بسجّل… اتكلم براحتك</h2><div class="rec"><i></i><span id="recS">٠:٠٠</span></div><p class="muted" style="text-align:center">لما تخلص دوس "خلصت". (أقصى حاجة ٣ دقايق)</p><div class="row"><button class="btn teal sp" id="recStop">خلصت</button><button class="btn ghost" id="recX">إلغاء</button></div>');
+ rec=new MediaRecorder(recStream,mt?{mimeType:mt}:undefined);recChunks=[];recText='';rec.ondataavailable=e=>{if(e.data.size)recChunks.push(e.data)};
+ rec.onstop=async()=>{recStream.getTracks().forEach(x=>x.stop());clearInterval(recTimer);const cancel=rec&&rec._cancel;const type=rec.mimeType||'audio/webm';rec=null;
+  const txt=await stopRecSR();if(cancel)return;const blob=new Blob(recChunks,{type});noteResult(txt,blob,null,dayKey)};
+ rec.start();recT=0;openSheet('<h2>بسجّل… اتكلم براحتك</h2><div class="rec"><i></i><span id="recS">٠:٠٠</span></div><div class="heard" id="recTx" style="min-height:44px;text-align:center">قول مثلاً: فكرني أشتري عيش كمان ساعة</div><p class="muted" style="text-align:center">لو قلت الوقت جوه الكلام هظبطه لوحدي. لما تخلص دوس "خلصت".</p><div class="row"><button class="btn teal sp" id="recStop">خلصت</button><button class="btn ghost" id="recX">إلغاء</button></div>');
+ if(WebSR){try{recSR=new WebSR();recSR.lang='ar-EG';recSR.continuous=true;recSR.interimResults=true;let fin='';
+  recSR.onresult=e=>{let t='';fin='';for(const x of e.results){if(x.isFinal)fin+=x[0].transcript+' ';else t+=x[0].transcript}recText=(fin+t).trim();const el=$('#recTx');if(el)el.textContent=recText||'…'};
+  recSR.onerror=()=>{};recSR._done=new Promise(r=>{recSR.onend=r});recSR.start()}catch(e){recSR=null}}
  recTimer=setInterval(()=>{recT++;const el=$('#recS');if(el)el.textContent=AR(Math.floor(recT/60))+':'+arD(pad(recT%60));if(recT>=180)stopRec()},1000);
  $('#recStop').onclick=()=>stopRec();$('#recX').onclick=()=>{stopRec(true);closeSheet()}}
+async function stopRecSR(){if(!recSR)return recText;const r=recSR;recSR=null;try{r.stop()}catch(e){}await Promise.race([r._done,new Promise(x=>setTimeout(x,1500))]);return recText}
 function stopRec(cancel){if(!rec)return;rec._cancel=!!cancel;try{rec.stop()}catch(e){}}
-function noteWhen(blob,dayKey){const u=URL.createObjectURL(blob);const base=dayKey?fromDk(dayKey):new Date();const isToday=!dayKey||dayKey===dk(new Date());
+function parseFor(text,dayKey){const q=smParse(text,Date.now());if(!q.at)return q;
+ if(dayKey&&dayKey!==dk(new Date())&&dk(q.at)!==dayKey){const x=new Date(q.at),y=fromDk(dayKey);y.setHours(q.hasTime?x.getHours():9,q.hasTime?x.getMinutes():0,0,0);q.at=y.getTime();q.dayOnly=!q.hasTime}return q}
+async function saveNote(o){let note=null,path=o.path||null;
+ if(o.blob){note='n'+uid();await idbPut(note,o.blob);if(NATIVE&&!path){try{const b64=await blobB64(o.blob);const r=await NP.saveAudio({name:note+(o.blob.type.includes('mp4')?'.m4a':o.blob.type.includes('ogg')?'.ogg':'.webm'),data:b64});path=r.path}catch(e){}}}
+ else if(path)note='file';
+ const t=addTask({text:o.text||'فويس نوت',at:o.at,dayOnly:o.dayOnly,rep:o.rep,note,notePath:path,src:'note'});
+ const m='تم التسجيل. هفكرك '+speakWhen(t)+(t.text!=='فويس نوت'?'، '+t.text:'');toast('تمام، هفكرك '+speakWhen(t)+(note?' بالفويس نوت':''));if(S.set.confirm)speak(m);return t}
+async function noteResult(text,blob,path,dayKey){closeSheet();
+ if(text)heard('<b>سمعتك:</b> '+esc(text));
+ const q=text?parseFor(text,dayKey):null;
+ if(q&&q.at){await saveNote({text:q.text||'فويس نوت',at:q.at,dayOnly:q.dayOnly,rep:q.rep,blob,path});if(!blob&&!path)toast('اتسجّل كلامك كتذكير');return}
+ noteWhen(blob,path,dayKey,q&&q.text?q.text:text)}
+function noteWhen(blob,path,dayKey,text){const u=blob?URL.createObjectURL(blob):null;const base=dayKey?fromDk(dayKey):new Date();const isToday=!dayKey||dayKey===dk(new Date());
  const chips=isToday?[[15,'بعد ربع ساعة'],[30,'بعد نص ساعة'],[60,'بعد ساعة'],[120,'بعد ساعتين'],[180,'بعد ٣ ساعات'],['tm9','بكرة ٩ الصبح']]:[['d9','٩ الصبح'],['d13','١ الضهر'],['d17','٥ العصر'],['d21','٩ بالليل']];
  const def=isToday?Date.now()+60*6e4:new Date(base.getFullYear(),base.getMonth(),base.getDate(),9).getTime();
- openSheet('<h2>تمام! أفكرك بيها إمتى؟</h2><audio controls src="'+u+'"></audio><div class="form"><input id="nT" placeholder="اسم للتذكير (اختياري)" value=""><div class="snz" id="nC">'+chips.map(c=>'<button data-c="'+c[0]+'">'+c[1]+'</button>').join('')+'</div><input id="nW" type="datetime-local" value="'+toLocalInput(def)+'">'+(canListen()?'<button class="btn ghost" id="nV">🎤 قول الوقت بصوتك</button>':'')+'<div class="row"><button class="btn teal sp" id="nS">سجّل التذكير</button><button class="btn ghost" id="nX">إلغاء</button></div></div>');
+ openSheet('<h2>تمام! أفكرك بيها إمتى؟</h2><p class="muted">مسمعتش وقت في كلامك، اختاره من هنا:</p>'+(u?'<audio controls src="'+u+'"></audio>':path?'<button class="btn ghost" id="nP">▶ اسمع الفويس نوت</button>':'')+'<div class="form"><input id="nT" placeholder="اسم للتذكير (اختياري)" value="'+esc(text||'')+'"><div class="snz" id="nC">'+chips.map(c=>'<button data-c="'+c[0]+'">'+c[1]+'</button>').join('')+'</div><input id="nW" type="datetime-local" value="'+toLocalInput(def)+'">'+(canListen()?'<button class="btn ghost" id="nV">🎤 قول الوقت بصوتك</button>':'')+'<div class="row"><button class="btn teal sp" id="nS">سجّل التذكير</button><button class="btn ghost" id="nX">إلغاء</button></div></div>');
+ if($('#nP'))$('#nP').onclick=()=>NP.playFile({path}).catch(()=>{});
  $('#nC').onclick=e=>{const b=e.target.closest('[data-c]');if(!b)return;$$('#nC button').forEach(x=>x.classList.toggle('on',x===b));const c=b.dataset.c;let at;
   if(c==='tm9'){const d=addDays(new Date(),1);d.setHours(9,0,0,0);at=d.getTime()}else if(c[0]==='d'){const d=new Date(base);d.setHours(+c.slice(1),0,0,0);at=d.getTime()}else at=Date.now()+(+c)*6e4;$('#nW').value=toLocalInput(at)};
  if($('#nV'))$('#nV').onclick=async()=>{const t=await listen('إمتى أفكرك؟');const q=t?smParse(t,Date.now()):null;if(q&&q.at){$('#nW').value=toLocalInput(q.at);if(q.text&&!$('#nT').value)$('#nT').value=q.text;toast('تمام: '+dayWord(q.at)+' '+sayTime(q.at))}else toast('مفهمتش الوقت، اختاره من تحت')};
  $('#nX').onclick=closeSheet;
- $('#nS').onclick=async()=>{const at=new Date($('#nW').value).getTime();if(!at){toast('اختار الوقت');return}const id='n'+uid();await idbPut(id,blob);let path=null;
-  if(NATIVE){try{const b64=await blobB64(blob);const r=await NP.saveAudio({name:id+(blob.type.includes('mp4')?'.m4a':blob.type.includes('ogg')?'.ogg':'.webm'),data:b64});path=r.path}catch(e){}}
-  const t=addTask({text:$('#nT').value.trim()||'فويس نوت',at,note:id,notePath:path,src:'note'});closeSheet();const m='تم التسجيل. هفكرك '+speakWhen(t)+' بالفويس نوت';toast('تم هفكرك '+speakWhen(t));if(S.set.confirm)speak(m)}}
+ $('#nS').onclick=async()=>{const at=new Date($('#nW').value).getTime();if(!at){toast('اختار الوقت');return}closeSheet();await saveNote({text:$('#nT').value.trim()||'فويس نوت',at,blob,path})}}
 const blobB64=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(String(f.result).split(',')[1]);f.readAsDataURL(b)});
 
 /* ---------- reminder engine (browser / PC) ---------- */
@@ -191,27 +232,27 @@ function engine(){if(popT&&$('#pop').classList.contains('on')){const t=findT(pop
   if(Date.now()-(t.ringAt||0)>=S.set.repeat*6e4){t.ringAt=Date.now();save();ring(t)}return}
  const now=Date.now();const due=S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at<=now&&t.at>now-12*3600e3&&(!t.ringAt||now-t.ringAt>=S.set.repeat*6e4)).sort((a,b)=>a.at-b.at)[0];
  if(due){due.ringAt=now;save();showPop(due);ring(due)}}
-function ring(t){const msg='بفكرك ب'+t.text;if(document.hidden&&'Notification'in window&&Notification.permission==='granted'){try{const n=new Notification('سمسم بيفكرك',{body:t.text,icon:'icon-192.png',tag:t.id,requireInteraction:true});n.onclick=()=>{window.focus();n.close()}}catch(e){}}
- if(t.note){speak('بفكرك بفويس نوت '+(t.text!=='فويس نوت'?t.text:'')).then(()=>{const el=$('#popAud');if(el)playNote(t,el)})}else speak(msg)}
+function ring(t){const msg=remLine(t);if(document.hidden&&'Notification'in window&&Notification.permission==='granted'){try{const n=new Notification('سمسم بيفكرك',{body:t.text,icon:'icon-192.png',tag:t.id,requireInteraction:true});n.onclick=()=>{window.focus();n.close()}}catch(e){}}
+ if(t.note){speak(msg).then(()=>{const el=$('#popAud');if(el)playNote(t,el)})}else speak(msg)}
 function showPop(t){popT=t.id;const late=Math.round((Date.now()-t.at)/6e4);
  $('#pop').innerHTML='<div class="pc"><div class="ph"><svg viewBox="0 0 512 512"><use href="#genie"/></svg><p>سمسم بيفكرك</p></div><div class="pb"><div class="muted">بفكرك بـ</div><h2>'+esc(t.text)+'</h2><div class="tl">'+(t.dayOnly?'النهارده':showTime(t.at)+' '+ampm(t.at))+(late>1?' — من '+AR(late)+' دقيقة':'')+(t.snz?' · اتأجل '+AR(t.snz)+' مرة':'')+'</div><div id="popAud"></div>'+
  '<div class="pact"><button class="btn ok" id="pOk">تم</button><div class="muted">أو أجّل:</div><div class="snz">'+S.set.snooze.map(m=>'<button data-m="'+m+'">'+minLabel(m)+'</button>').join('')+'</div></div></div></div>';
  $('#pop').classList.add('on');if(t.note)playNote(t,$('#popAud'));
- $('#pOk').onclick=()=>{markDone(t);hidePop();speak('عاش');};
+ $('#pOk').onclick=()=>{markDone(t);hidePop();speak('عاش يا بطل');};
  $('#pop').querySelector('.snz').onclick=e=>{const b=e.target.closest('[data-m]');if(!b)return;snooze(t,+b.dataset.m);hidePop();toast('هفكرك تاني بعد '+minLabel(+b.dataset.m))}}
 function hidePop(){$('#pop').classList.remove('on');popT=null;if(curAudio)curAudio.pause();if('speechSynthesis'in window)speechSynthesis.cancel()}
 let unlocked=false;function unlockAudio(){if(unlocked)return;unlocked=true;try{const a=new Audio();a.muted=true;a.play().catch(()=>{})}catch(e){}if('Notification'in window&&Notification.permission==='default')Notification.requestPermission().catch(()=>{})}
 
 /* ---------- native schedule ---------- */
-function nsched(){if(!NATIVE)return;const now=Date.now(),items=[];
+function nsched(){if(!NATIVE)return;setTimeout(ensureClips,50);const now=Date.now(),items=[];
  S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at>now-12*3600e3).sort((a,b)=>a.at-b.at).slice(0,120).forEach(t=>{
   items.push({id:hid(t.id),key:okey(t),task:t.id,time:Math.max(t.at,now+3000),exp:t.at+12*3600e3,title:'سمسم بيفكرك',body:t.text,persistent:true,repeat:S.set.repeat,
-   sound:t.notePath?'note':(S.set.voice?'tts':'none'),file:t.notePath||'',speech:t.notePath?('بفكرك بفويس نوت'+(t.text!=='فويس نوت'?' '+t.text:'')):'بفكرك ب'+t.text,
+   sound:t.notePath?'note':(S.set.voice?'tts':'none'),file:t.notePath||'',speech:egSay(remLine(t)),speechFile:(t.vclip&&t.vclip.line===egSay(remLine(t)))?t.vclip.path:'',voice:S.set.voiceName||'',
    when:t.dayOnly?'النهارده':showTime(t.at)+' '+ampm(t.at),snooze:S.set.snooze,snDef:S.set.snDef,rate:S.set.rate,kind:'task'})});
  // day close
  const b=boundary(addDays(fromDk(logicalDay()),1));const left=S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at<b.getTime()).length;
  items.push({id:hid('close'+dk(b)),key:'close:'+dk(b),time:b.getTime()+5000,exp:b.getTime()+6*3600e3,title:'سمسم — تقرير اليوم',body:left?'فاضل '+left+' مهام ما خلصتش. تنقلها لبكرة؟':'خلّصت كل مهام النهارده 👏',persistent:false,repeat:0,sound:S.set.voice?'tts':'none',
-  speech:'خلص اليوم'+(S.set.name?' يا '+S.set.name:'')+'. '+(left?'فاضل '+left+' مهام ما خلصتش. افتح سمسم تشوف التقرير وتنقلها لبكرة':'خلصت كل مهام النهارده، عاش'),kind:'close',rate:S.set.rate});
+  speech:egSay('خلص اليوم'+(S.set.name?' يا '+S.set.name:'')+'. '+(left?'فاضل '+left+' مهام ما خلصتش. افتح سمسم تشوف التقرير وتنقلها لبكرة':'خلصت كل مهام النهارده، عاش')),kind:'close',rate:S.set.rate,voice:S.set.voiceName||''});
  NP.schedule({items}).catch(()=>{})}
 async function nativeAcks(){if(!NATIVE)return;try{const r=await NP.getAcks();(r.acks||[]).forEach(applyAck);save();render()}catch(e){}}
 function applyAck(a){if(!a||!a.key)return;if(a.key.startsWith('close:')){if(a.act==='open')go('rep');return}const id=a.key.split(':')[0],t=findT(id);if(!t)return;
@@ -300,8 +341,8 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  '<div class="set"><label>يقول "تم التسجيل" بعد كل تذكير</label><input type="checkbox" class="sw" id="sConf"'+(s.confirm?' checked':'')+'></div>'+
  '<div class="set"><label>سرعة الكلام</label><input type="range" id="sRate" min="0.6" max="1.4" step="0.1" value="'+s.rate+'" style="width:150px"></div>'+
  (!NATIVE&&WebSR?'<div class="set"><label>"يا سمسم" وهو مفتوح<small>على الكمبيوتر: قول "يا سمسم" وبعدها الكلام من غير ما تدوس حاجة</small></label><input type="checkbox" class="sw" id="sWake"'+(s.wake?' checked':'')+'></div>':'')+
- '<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
- '<div class="card"><h3>الشكل</h3><div class="set"><label>الوضع</label><select id="sTheme"><option value="auto">تلقائي</option><option value="light"'+(s.theme==='light'?' selected':'')+'>فاتح</option><option value="dark"'+(s.theme==='dark'?' selected':'')+'>غامق</option></select></div></div>'+
+ '<div class="set"><label>صوت الموبايل<small>جرّب الأصوات العربي واختار أحسنها</small></label><select id="sVc" style="max-width:200px"><option value="">تلقائي</option></select></div>'+'<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+'<div class="set" style="display:block"><label>صوت مصري طبيعي (اختياري)<small>أصوات الموبايل عربي فصحى. لو عايز صوت مصري حقيقي (سلمى أو شاكر من مايكروسوفت) حط مفتاح Azure Speech المجاني هنا. من غيره سمسم هيشتغل عادي بصوت الموبايل.</small></label><div class="form"><input id="azK" placeholder="Azure Speech key" value="'+esc(s.az&&s.az.key||'')+'" dir="ltr"><div class="row"><input id="azR" placeholder="region مثلاً uaenorth" value="'+esc(s.az&&s.az.region||'')+'" dir="ltr" style="flex:1"><select id="azV" style="flex:1"><option value="ar-EG-SalmaNeural">سلمى (ست)</option><option value="ar-EG-ShakirNeural"'+(s.az&&s.az.voice==='ar-EG-ShakirNeural'?' selected':'')+'>شاكر (راجل)</option></select></div><div class="row"><button class="btn sm sp" id="azS">احفظ وجرّب</button>'+(s.az&&s.az.key?'<button class="btn sm ghost" id="azD">إلغاء الصوت المصري</button>':'')+'</div></div></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
+ '<div class="card"><h3>الشكل</h3><div class="set"><label>الوضع<small>تقدر كمان تبدّل من زرار ☀️/🌙 فوق في الرئيسية</small></label><select id="sTheme"><option value="auto">تلقائي (نهاري الصبح وليلي بالليل)</option><option value="light"'+(s.theme==='light'?' selected':'')+'>نهاري ☀️</option><option value="dark"'+(s.theme==='dark'?' selected':'')+'>ليلي 🌙</option></select></div></div>'+
  '<div class="card" id="permCard"></div>'+
  '<div class="card"><h3>تجربة</h3><div class="set"><label>جرّب تذكير بعد ١٠ ثواني<small>عشان تشوف الـ Pop-up والصوت'+(NATIVE?' — اقفل الشاشة واستنى':'')+'</small></label><button class="btn sm" id="sTest">جرّب</button></div></div>'+
  '<div class="card"><h3>نسخة احتياطية</h3><div class="row" style="margin-top:8px"><button class="btn sm ghost" id="sExp">صدّر</button><button class="btn sm ghost" id="sImp">استورد</button><button class="btn sm ghost" id="sClr" style="color:var(--warn)">امسح المهام المنتهية</button></div><textarea id="sBox" placeholder="البيانات هتظهر هنا…" hidden></textarea></div><footer class="brand">سمسم — تطوير <b>BeSoft</b></footer>';
@@ -313,14 +354,25 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  on('#sClose','change',e=>{s.closeH=+e.target.value;S.lastDay=logicalDay();save()});
  on('#sVoice','change',e=>{s.voice=e.target.checked;save()});on('#sConf','change',e=>{s.confirm=e.target.checked;save()});on('#sRate','change',e=>{s.rate=+e.target.value;save();speak('أهلاً، أنا سمسم')});
  on('#sWake','change',e=>{s.wake=e.target.checked;save();if(s.wake){unlockAudio();startWake();toast('قول "يا سمسم" في أي وقت والبرنامج مفتوح')}else stopWake()});
- on('#sTry','click',()=>speak('أهلاً'+(s.name?' يا '+s.name:'')+'، أنا سمسم. قولّي فكرني بإيه وأنا هفكرك'));
+ on('#sTry','click',()=>speak('أهلاً'+(s.name?' يا '+s.name:'')+'، أنا سمسم. قولّي فكرني بإيه، وأنا هفكرك في معاده',true));
  on('#sTheme','change',e=>{s.theme=e.target.value;save();applyTheme()});
+ fillVoices();
+ on('#sVc','change',e=>{s.voiceName=e.target.value;save();pickVoice();speak('أهلاً، أنا سمسم. ده صوتي الجديد',true)});
+ on('#azS','click',async()=>{const key=$('#azK').value.trim(),region=$('#azR').value.trim().toLowerCase();if(!key||!region){toast('اكتب المفتاح والـ region');return}
+  s.az={key,region,voice:$('#azV').value};save();toast('بجرّب الصوت…');try{if(NATIVE)await NP.playFile({path:await azFile(egSay('أهلاً'+(s.name?' يا '+s.name:'')+'، أنا سمسم، وده صوتي المصري'))});else{const b=await azBlob(egSay('أهلاً، أنا سمسم، وده صوتي المصري'));await new Audio(URL.createObjectURL(b)).play()}toast('اشتغل 👌');S.tasks.forEach(t=>delete t.vclip);save()}catch(e){toast('المفتاح أو الـ region مش مظبوطين، أو مفيش نت');}renderSet()});
+ on('#azD','click',()=>{delete s.az;S.tasks.forEach(t=>delete t.vclip);save();renderSet();toast('رجعنا لصوت الموبايل')});
  on('#sTest','click',()=>{unlockAudio();const t=addTask({text:'ده تذكير تجربة من سمسم',at:Date.now()+10000,src:'test'});toast('استنى ١٠ ثواني…')});
  on('#sExp','click',()=>{const b=$('#sBox');b.hidden=false;b.value=JSON.stringify({...S,tasks:S.tasks.map(t=>({...t}))});b.select();try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([b.value],{type:'application/json'}));a.download='smsm-backup-'+dk(new Date())+'.json';a.click()}catch(e){}});
  on('#sImp','click',()=>{const b=$('#sBox');if(b.hidden||!b.value.trim()){b.hidden=false;b.value='';b.placeholder='الصق البيانات هنا ودوس استورد تاني';b.focus();return}try{const o=JSON.parse(b.value);if(!o.tasks)throw 0;S={...JSON.parse(JSON.stringify(DEF)),...o,set:{...DEF.set,...o.set}};save();render();renderSet();toast('اتستوردت')}catch(e){toast('البيانات دي مش سليمة')}});
  on('#sClr','click',()=>{if(!confirmBox('أمسح كل المهام اللي خلصت أو اتقفلت؟ (التقارير هتفضل)'))return;S.tasks.filter(t=>t.done||t.closed).forEach(t=>{if(t.note)idbDel(t.note)});S.tasks=S.tasks.filter(t=>!(t.done||t.closed));save();render();toast('اتمسحت')});
  $$('#setBody [data-o]').forEach(b=>b.onclick=()=>NP.open({what:b.dataset.o}));
  renderPerm()}
+async function fillVoices(){const sel=$('#sVc');if(!sel)return;let list=[];
+ if(NATIVE){try{const r=await NP.voices();list=(r.voices||[]).filter(v=>v.installed||v.network).map(v=>({id:v.name,label:(/EG/i.test(v.locale)?'🇪🇬 ':'')+v.locale+' — '+v.name.replace(/^ar-[a-z]+-x-/i,'')+(v.network?' (نت)':'')}))}catch(e){}}
+ else if('speechSynthesis'in window)list=speechSynthesis.getVoices().filter(v=>/^ar/i.test(v.lang)).map(v=>({id:v.name,label:(/EG/i.test(v.lang)?'🇪🇬 ':'')+v.name}));
+ list.sort((a,b)=>(/🇪🇬/.test(b.label)?1:0)-(/🇪🇬/.test(a.label)?1:0));
+ sel.innerHTML='<option value="">تلقائي</option>'+list.map(v=>'<option value="'+esc(v.id)+'"'+(S.set.voiceName===v.id?' selected':'')+'>'+esc(v.label)+'</option>').join('');
+ if(!list.length)sel.innerHTML='<option value="">مفيش أصوات عربي — نزّلها من إعدادات الموبايل</option>'}
 async function renderPerm(){const c=$('#permCard');if(!c)return;
  if(!NATIVE){c.innerHTML='<h3>التنبيهات على الكمبيوتر</h3><p class="muted">سيب سمسم مفتوح في تاب، وهيطلع لك Pop-up بالصوت في معاده. ولو التاب في الخلفية هيبعت إشعار.</p><div class="set"><label>إشعارات المتصفح</label><button class="btn sm ghost" id="pN">'+('Notification'in window?(Notification.permission==='granted'?'مفعّلة':'فعّل'):'غير مدعومة')+'</button></div>';
   const b=$('#pN');if(b)b.onclick=()=>{if('Notification'in window)Notification.requestPermission().then(renderPerm)};return}
@@ -333,7 +385,11 @@ async function renderPerm(){const c=$('#permCard');if(!c)return;
 function go(v){$$('.view').forEach(x=>x.classList.toggle('on',x.id==='v-'+v));$$('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));window.scrollTo(0,0);if(v==='cal')renderCal();if(v==='rep')renderRep();if(v==='set')renderSet()}
 $('#nav').onclick=e=>{const b=e.target.closest('[data-v]');if(b)go(b.dataset.v)};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b)go(b.dataset.go)});
-function applyTheme(){const t=S.set.theme;if(t==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.dataset.theme=t}
+function curTheme(){const t=S.set.theme;if(t==='light'||t==='dark')return t;const H=new Date().getHours();return H>=6&&H<18?'light':'dark'}
+const SUN='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>',MOON='<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+function applyTheme(){const t=curTheme();if(document.documentElement.dataset.theme!==t)document.documentElement.dataset.theme=t;const b=$('#themeBtn');if(b){b.innerHTML=t==='dark'?MOON:SUN;b.title=t==='dark'?'الوضع الليلي':'الوضع النهاري'}
+ const m=document.querySelector('meta[name=theme-color]');if(m)m.content=t==='dark'?'#0b1a36':'#2f7fe0'}
+$('#themeBtn').onclick=()=>{S.set.theme=curTheme()==='dark'?'light':'dark';save();applyTheme();toast(S.set.theme==='dark'?'الوضع الليلي 🌙':'الوضع النهاري ☀️')};
 function wakeBtn(){const b=$('#listenBtn');if(NATIVE||!WebSR){b.hidden=true;return}b.textContent=S.set.wake?'🎧 سامعك':'🎧 يا سمسم';b.onclick=()=>{S.set.wake=!S.set.wake;save();wakeBtn();if(S.set.wake){unlockAudio();startWake();toast('قول "يا سمسم" وبعدها اللي عايزه')}else stopWake()}}
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopWake();else{startWake();nativeAcks();tick();render()}});
 async function boot(){applyTheme();wakeBtn();tick();render();setInterval(tick,1000);

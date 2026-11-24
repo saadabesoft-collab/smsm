@@ -105,7 +105,7 @@ public class ReminderActivity extends Activity {
         final boolean close = "close".equals(item.optString("kind"));
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0xB30C0A28);
+        root.setBackgroundColor(0xB30A1427);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
         ScrollView scroll = new ScrollView(this);
@@ -119,7 +119,7 @@ public class ReminderActivity extends Activity {
         card.setClipToOutline(true);
         scroll.addView(card, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        GradientDrawable head = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{0xFF2B2A6B, 0xFF4A3F9E});
+        GradientDrawable head = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{0xFF2F7FE0, 0xFF62B3F6});
         float r = dp(28);
         head.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
         LinearLayout header = new LinearLayout(this);
@@ -130,7 +130,7 @@ public class ReminderActivity extends Activity {
         ImageView genie = new ImageView(this);
         genie.setImageResource(R.drawable.genie);
         genie.setClipToOutline(true);
-        genie.setBackground(round(0xFF2B2A6B, 22));
+        genie.setBackground(round(0xFF123A73, 22));
         header.addView(genie, new LinearLayout.LayoutParams(dp(84), dp(84)));
         TextView brand = text(close ? "سمسم — آخر اليوم" : "سمسم بيفكرك", 15, 0xE6FFFFFF, false);
         brand.setPadding(0, dp(6), 0, 0);
@@ -143,16 +143,16 @@ public class ReminderActivity extends Activity {
         card.addView(body);
 
         if (close) {
-            body.addView(text(item.optString("title"), 22, 0xFF1D1B3F, true));
-            body.addView(text(item.optString("body"), 17, 0xFF55527A, false), full(6));
-            Button open = button("شوف التقرير", 0xFF6C5CE7, Color.WHITE, 18);
+            body.addView(text(item.optString("title"), 22, 0xFF13284A, true));
+            body.addView(text(item.optString("body"), 17, 0xFF5D7290, false), full(6));
+            Button open = button("شوف التقرير", 0xFF2F7FE0, Color.WHITE, 18);
             body.addView(open, full(18));
             open.setOnClickListener(v -> {
                 ActionReceiver.handle(this, json, "close", 0);
                 startActivity(AlertService.appIntent(this, item.optString("key"), "report"));
                 finish();
             });
-            Button later = button("بعدين", 0xFFEFECFF, 0xFF1D1B3F, 16);
+            Button later = button("بعدين", 0xFFE9F2FD, 0xFF13284A, 16);
             body.addView(later, full(10));
             later.setOnClickListener(v -> {
                 ActionReceiver.handle(this, json, "close", 0);
@@ -162,18 +162,18 @@ public class ReminderActivity extends Activity {
             return;
         }
 
-        body.addView(text("بفكرك بـ", 14, 0xFF8A86B0, false));
-        body.addView(text(item.optString("body"), 26, 0xFF1D1B3F, true), full(2));
+        body.addView(text("بفكرك بـ", 14, 0xFF5D7290, false));
+        body.addView(text(item.optString("body"), 26, 0xFF13284A, true), full(2));
         String when = item.optString("when");
         int sn = item.optInt("snoozed", 0);
         if (sn > 0) when = when + (when.length() > 0 ? " · " : "") + "اتأجل " + sn + " مرة";
-        if (when.length() > 0) body.addView(text(when, 14, 0xFF8A86B0, false), full(4));
+        if (when.length() > 0) body.addView(text(when, 14, 0xFF5D7290, false), full(4));
         if ("note".equals(item.optString("sound"))) {
-            TextView note = text("🎙 بيشغّل الفويس نوت بتاعتك", 14, 0xFF2BB7A8, true);
+            TextView note = text("🎙 بيشغّل الفويس نوت بتاعتك", 14, 0xFFC98F0B, true);
             body.addView(note, full(8));
         }
 
-        Button done = button("تم ✓", 0xFF22A88F, Color.WHITE, 20);
+        Button done = button("تم ✓", 0xFF2F7FE0, Color.WHITE, 20);
         done.setMinHeight(dp(60));
         body.addView(done, full(18));
         done.setOnClickListener(v -> {
@@ -181,7 +181,7 @@ public class ReminderActivity extends Activity {
             finish();
         });
 
-        body.addView(text("أو أجّل:", 14, 0xFF8A86B0, false), full(14));
+        body.addView(text("أو أجّل:", 14, 0xFF5D7290, false), full(14));
         JSONArray sz = item.optJSONArray("snooze");
         if (sz == null || sz.length() == 0) sz = new JSONArray().put(5).put(10).put(15).put(30).put(60);
         LinearLayout row = null;
@@ -192,7 +192,7 @@ public class ReminderActivity extends Activity {
                 body.addView(row, full(8));
             }
             final int m = sz.optInt(i);
-            Button b = button(AlertService.minLabel(m), 0xFFFFE6DC, 0xFF3B1A0C, 15);
+            Button b = button(AlertService.minLabel(m), 0xFFFDF1CF, 0xFF5A3D00, 15);
             b.setMinHeight(dp(48));
             LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             bp.setMargins(dp(4), 0, dp(4), 0);
@@ -212,14 +212,14 @@ public class ReminderActivity extends Activity {
             }
         }
 
-        Button mute = button("اسكت الصوت", Color.TRANSPARENT, 0xFF6C5CE7, 15);
+        Button mute = button("اسكت الصوت", Color.TRANSPARENT, 0xFF2F7FE0, 15);
         body.addView(mute, full(8));
         mute.setOnClickListener(v -> {
             stopSound();
             mute.setVisibility(View.GONE);
         });
 
-        TextView foot = text("BeSoft", 12, 0xFFA6A3CF, false);
+        TextView foot = text("BeSoft", 12, 0xFF9FB3D3, false);
         foot.setPadding(0, dp(4), 0, 0);
         body.addView(foot, full(0));
         setContentView(root);

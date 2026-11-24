@@ -147,7 +147,7 @@ public class AlertService extends Service {
         String when = it.optString("when");
         NotificationCompat.Builder b = new NotificationCompat.Builder(c, close ? CH_SOFT : CH_MAIN)
                 .setSmallIcon(R.drawable.ic_stat_smsm)
-                .setColor(0xFF6C5CE7)
+                .setColor(0xFF2F7FE0)
                 .setContentTitle(close ? it.optString("title") : "بفكرك بـ " + body)
                 .setContentText(close ? body : (when.length() > 0 ? when : "سمسم بيفكرك"))
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(close ? body : body + (when.length() > 0 ? "\n" + when : "")))
@@ -193,13 +193,17 @@ public class AlertService extends Service {
             return;
         }
         final String file = it.optString("file");
-        if ("note".equals(sound) && file.length() > 0 && new File(file).exists()) {
-            afterSpeech = () -> playFile(file);
-        } else {
-            afterSpeech = null;
+        final boolean hasNote = "note".equals(sound) && file.length() > 0 && new File(file).exists();
+        afterSpeech = hasNote ? () -> playFile(file, true) : null;
+        String clip = it.optString("speechFile");
+        if (clip.length() > 0 && new File(clip).exists()) {
+            playFile(clip, !hasNote);
+            armTimeout(5 * 60 * 1000);
+            return;
         }
         String text = it.optString("speech");
         float rate = (float) it.optDouble("rate", 1.0);
+        voiceName = it.optString("voice");
         if (text.length() == 0) {
             if (afterSpeech != null) afterSpeech.run();
             else armTimeout(4000);
@@ -209,7 +213,10 @@ public class AlertService extends Service {
         armTimeout(4 * 60 * 1000);
     }
 
-    private void playFile(String path) {
+    private String voiceName = "";
+
+    /** last=true: the reminder is over when this file ends; otherwise go on to the voice note. */
+    private void playFile(String path, boolean last) {
         try {
             releasePlayer();
             player = new MediaPlayer();
@@ -217,9 +224,9 @@ public class AlertService extends Service {
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
             player.setDataSource(path);
-            player.setOnCompletionListener(mp -> handler.post(this::finishCurrent));
+            player.setOnCompletionListener(mp -> handler.post(last ? this::finishCurrent : this::afterSpeak));
             player.setOnErrorListener((mp, w, e) -> {
-                handler.post(this::finishCurrent);
+                handler.post(last ? this::finishCurrent : this::afterSpeak);
                 return true;
             });
             player.prepare();
@@ -248,6 +255,18 @@ public class AlertService extends Service {
         }
     }
 
+    static void applyVoice(TextToSpeech t, String name) {
+        if (t == null || name == null || name.length() == 0) return;
+        try {
+            for (android.speech.tts.Voice v : t.getVoices()) {
+                if (name.equals(v.getName())) {
+                    t.setVoice(v);
+                    return;
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     static boolean setArabic(TextToSpeech t) {
         int r = t.setLanguage(new Locale("ar", "EG"));
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) r = t.setLanguage(new Locale("ar"));
@@ -269,6 +288,7 @@ public class AlertService extends Service {
             return;
         }
         tts.setAudioAttributes(attrs);
+        applyVoice(tts, voiceName);
         tts.setSpeechRate(0.95f * speechRate);
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override public void onStart(String id) {}

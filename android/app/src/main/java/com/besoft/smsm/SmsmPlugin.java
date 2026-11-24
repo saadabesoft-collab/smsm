@@ -1,6 +1,17 @@
 package com.besoft.smsm;
 
 import android.Manifest;
+import android.app.Activity;
+import android.media.MediaPlayer;
+import android.speech.RecognizerIntent;
+import android.speech.tts.Voice;
+import androidx.activity.result.ActivityResult;
+import com.getcapacitor.annotation.ActivityCallback;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
 import android.app.AlarmManager;
 import android.app.NotificationManager;
 import android.content.Context;
@@ -46,6 +57,9 @@ public class SmsmPlugin extends Plugin {
     private PluginCall waitingSpeak;
     private String waitingText;
     private float waitingRate = 1f;
+    private String voiceName = "";
+    private MediaPlayer player;
+    private PluginCall playCall;
 
     @Override
     public void load() {
@@ -202,6 +216,7 @@ public class SmsmPlugin extends Plugin {
     public void speak(PluginCall call) {
         String text = call.getString("text", "");
         float rate = call.getFloat("rate", 1f);
+        voiceName = call.getString("voice", "");
         if (text.length() == 0) {
             call.resolve();
             return;
@@ -246,6 +261,7 @@ public class SmsmPlugin extends Plugin {
         speaking.clear();
         String id = "s" + System.nanoTime();
         speaking.put(id, call);
+        AlertService.applyVoice(tts, voiceName);
         tts.setSpeechRate(0.95f * rate);
         Bundle p = new Bundle();
         p.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f);
@@ -288,8 +304,192 @@ public class SmsmPlugin extends Plugin {
         call.resolve();
     }
 
+
+    /** Arabic voices installed on the phone, so the user can pick the nicest one. */
+    @PluginMethod
+    public void voices(PluginCall call) {
+        if (tts == null || !ttsInit) {
+            if (tts == null) {
+                tts = new TextToSpeech(getContext().getApplicationContext(), status -> {
+                    ttsInit = true;
+                    ttsReady = status == TextToSpeech.SUCCESS && AlertService.setArabic(tts);
+                    if (ttsReady) {
+                        tts.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                        tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                            @Override public void onStart(String id) {}
+                            @Override public void onDone(String id) { finishSpeak(id); }
+                            @Override public void onError(String id) { finishSpeak(id); }
+                        });
+                    }
+                    listVoices(call);
+                });
+            } else {
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> listVoices(call), 1200);
+            }
+            return;
+        }
+        listVoices(call);
+    }
+
+    private void listVoices(PluginCall call) {
+        JSArray arr = new JSArray();
+        try {
+            if (tts != null && tts.getVoices() != null) {
+                for (Voice v : tts.getVoices()) {
+                    if (v.getLocale() == null || !"ar".equals(v.getLocale().getLanguage())) continue;
+                    JSObject o = new JSObject();
+                    o.put("name", v.getName());
+                    o.put("locale", v.getLocale().toLanguageTag());
+                    o.put("quality", v.getQuality());
+                    o.put("network", v.isNetworkConnectionRequired());
+                    o.put("installed", v.getFeatures() == null || !v.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED));
+                    arr.put(o);
+                }
+            }
+        } catch (Exception ignored) {}
+        JSObject r = new JSObject();
+        r.put("voices", arr);
+        r.put("engine", tts != null ? tts.getDefaultEngine() : "");
+        call.resolve(r);
+    }
+
+    /** Google's speech popup: gives the words AND the recording, so a voice note gets its time automatically. */
+    @PluginMethod
+    public void listenNote(PluginCall call) {
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, call.getString("language", "ar-EG"));
+        i.putExtra(RecognizerIntent.EXTRA_PROMPT, call.getString("prompt", "قول الفويس نوت"));
+        i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        i.putExtra("android.speech.extra.GET_AUDIO_FORMAT", "audio/AMR");
+        i.putExtra("android.speech.extra.GET_AUDIO", true);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+        try {
+            startActivityForResult(call, i, "onNote");
+        } catch (Exception e) {
+            call.reject("no_recognizer");
+        }
+    }
+
+    @ActivityCallback
+    private void onNote(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        JSObject o = new JSObject();
+        Intent d = result.getData();
+        if (result.getResultCode() != Activity.RESULT_OK || d == null) {
+            o.put("cancel", true);
+            call.resolve(o);
+            return;
+        }
+        ArrayList<String> m = d.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+        o.put("text", m != null && !m.isEmpty() ? m.get(0) : "");
+        Uri u = d.getData();
+        if (u != null) {
+            try {
+                File dir = new File(getContext().getFilesDir(), "notes");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, "v" + System.currentTimeMillis() + ".amr");
+                try (InputStream in = getContext().getContentResolver().openInputStream(u); OutputStream out = new FileOutputStream(f)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+                if (f.length() > 200) o.put("path", f.getAbsolutePath());
+                else f.delete();
+            } catch (Exception ignored) {}
+        }
+        call.resolve(o);
+    }
+
+    /** Play a saved recording inside the app; resolves when it ends. */
+    @PluginMethod
+    public void playFile(PluginCall call) {
+        String path = call.getString("path", "");
+        stopPlayer();
+        try {
+            player = new MediaPlayer();
+            player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+            player.setDataSource(path);
+            playCall = call;
+            player.setOnCompletionListener(mp -> stopPlayer());
+            player.setOnErrorListener((mp, w, e) -> { stopPlayer(); return true; });
+            player.prepare();
+            player.start();
+        } catch (Exception e) {
+            stopPlayer();
+            call.reject("play failed");
+        }
+    }
+
+    @PluginMethod
+    public void stopFile(PluginCall call) {
+        stopPlayer();
+        call.resolve();
+    }
+
+    private void stopPlayer() {
+        if (player != null) {
+            try { player.stop(); } catch (Exception ignored) {}
+            try { player.release(); } catch (Exception ignored) {}
+            player = null;
+        }
+        PluginCall c = playCall;
+        playCall = null;
+        if (c != null) c.resolve();
+    }
+
+    /** Optional natural Egyptian voice from Microsoft Azure: saves the sentence as an mp3 (cached). */
+    @PluginMethod
+    public void cloudTts(PluginCall call) {
+        final String text = call.getString("text", "");
+        final String key = call.getString("key", "");
+        final String region = call.getString("region", "").replaceAll("[^a-z0-9]", "");
+        final String voice = call.getString("voice", "ar-EG-SalmaNeural").replaceAll("[^A-Za-z0-9-]", "");
+        final String name = call.getString("name", "c" + System.currentTimeMillis() + ".mp3").replaceAll("[^A-Za-z0-9._-]", "_");
+        final float rate = call.getFloat("rate", 1f);
+        new Thread(() -> {
+            try {
+                File dir = new File(getContext().getFilesDir(), "voice");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, name);
+                if (!f.exists() || f.length() < 500) {
+                    String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+                    int pct = Math.round((rate - 1f) * 100);
+                    String ssml = "<speak version='1.0' xml:lang='ar-EG'><voice name='" + voice + "'><prosody rate='" + pct + "%'>" + safe + "</prosody></voice></speak>";
+                    HttpURLConnection c = (HttpURLConnection) new URL("https://" + region + ".tts.speech.microsoft.com/cognitiveservices/v1").openConnection();
+                    c.setRequestMethod("POST");
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(15000);
+                    c.setDoOutput(true);
+                    c.setRequestProperty("Ocp-Apim-Subscription-Key", key);
+                    c.setRequestProperty("Content-Type", "application/ssml+xml");
+                    c.setRequestProperty("X-Microsoft-OutputFormat", "audio-24khz-48kbitrate-mono-mp3");
+                    c.setRequestProperty("User-Agent", "smsm");
+                    try (OutputStream o = c.getOutputStream()) { o.write(ssml.getBytes("UTF-8")); }
+                    int code = c.getResponseCode();
+                    if (code != 200) {
+                        call.reject("azure " + code);
+                        return;
+                    }
+                    try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(f)) {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    }
+                }
+                JSObject r = new JSObject();
+                r.put("path", f.getAbsolutePath());
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject("azure failed");
+            }
+        }).start();
+    }
+
     @Override
     protected void handleOnDestroy() {
+        stopPlayer();
         if (tts != null) {
             try { tts.shutdown(); } catch (Exception ignored) {}
             tts = null;
