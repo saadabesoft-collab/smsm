@@ -55,7 +55,7 @@ async function azBlob(text){const k=azName(text);if(azCache.has(k))return azCach
   body:"<speak version='1.0' xml:lang='ar-EG'><voice name='"+(a.voice||'ar-EG-SalmaNeural')+"'><prosody rate='"+Math.round((S.set.rate-1)*100)+"%'>"+x+"</prosody></voice></speak>"});
  if(!r.ok)throw new Error('az '+r.status);const b=await r.blob();azCache.set(k,b);return b}
 async function azFile(text){const a=S.set.az;const r=await NP.cloudTts({text,key:a.key,region:a.region,voice:a.voice||'ar-EG-SalmaNeural',rate:S.set.rate,name:azName(text)});return r.path}
-async function speak(text,force){if((!S.set.voice&&!force)||!text)return;text=egSay(text);
+async function speak(text,force){if((!S.set.voice&&!force)||!text)return;if(NATIVE&&wakeOn){stopWake();setTimeout(startWake,4000)}text=egSay(text);
  if(azOn()){try{if(NATIVE){const f=await azFile(text);await NP.playFile({path:f});return}const b=await azBlob(text);await new Promise(res=>{const a=new Audio(URL.createObjectURL(b));a.onended=a.onerror=res;a.play().catch(res)});return}catch(e){}}
  if(NATIVE){try{await NP.speak({text,rate:S.set.rate,voice:S.set.voiceName||''})}catch(e){}return}
  if(!('speechSynthesis'in window))return;
@@ -85,13 +85,26 @@ async function listen(prompt){
  }catch(e){return''}finally{setLive(false);setTimeout(startWake,600)}}
 
 /* "يا سمسم" while the app is open (PC/browser) */
-let wakeR=null,wakeOn=false;
-function startWake(){if(NATIVE||!WebSR||!S.set.wake||wakeOn||listening||document.hidden)return;
- try{wakeR=new WebSR();wakeR.lang='ar-EG';wakeR.continuous=true;wakeR.interimResults=false;wakeOn=true;
-  wakeR.onresult=e=>{const t=e.results[e.results.length-1][0].transcript;if(/سمسم|سم سم|سمسن/.test(t)){stopWake();const rest=t.replace(/.*?(?:يا\s*)?(?:سمسم|سم سم|سمسن)/,'').trim();converse(rest.length>4?t:null,true)}};
-  wakeR.onend=()=>{wakeOn=false;if(S.set.wake&&!listening)setTimeout(startWake,500)};wakeR.onerror=()=>{};wakeR.start()}catch(e){wakeOn=false}}
-function stopWake(){if(wakeR){wakeOn=false;try{wakeR.onend=null;wakeR.abort()}catch(e){}wakeR=null}}
-
+let wakeR=null,wakeOn=false,wakeBusy=false;
+const NAME_RE=/سمسم|سم سم|سمسن|سيمسم|simsim/i;
+const canWake=()=>NATIVE||!!WebSR;
+async function startWake(){if(!S.set.wake||wakeOn||listening||wakeBusy||rec||document.hidden||!canWake())return;wakeOn=true;
+ if(NATIVE){try{const p=await SRP.checkPermissions();if(p.speechRecognition!=='granted'){const r=await SRP.requestPermissions();if(r.speechRecognition!=='granted'){wakeOn=false;toast('محتاج إذن الميكروفون عشان أسمع "يا سمسم"');wakeUI();return}}await NP.wakeStart()}catch(e){wakeOn=false}wakeUI();return}
+ try{wakeR=new WebSR();wakeR.lang='ar-EG';wakeR.continuous=true;wakeR.interimResults=false;
+  wakeR.onresult=e=>{const t=e.results[e.results.length-1][0].transcript;if(NAME_RE.test(t))onWake(t)};
+  wakeR.onend=()=>{wakeOn=false;wakeR=null;if(S.set.wake&&!listening&&!wakeBusy)setTimeout(startWake,400)};wakeR.onerror=()=>{};wakeR.start()}catch(e){wakeOn=false}wakeUI()}
+function stopWake(){if(NATIVE){if(wakeOn){wakeOn=false;NP.wakeStop().catch(()=>{})}wakeUI();return}
+ if(wakeR){try{wakeR.onend=null;wakeR.abort()}catch(e){}wakeR=null}wakeOn=false;wakeUI()}
+/* heard "يا سمسم": a whole sentence is handled right away, the name alone opens a new reminder */
+async function onWake(t){stopWake();if(wakeBusy)return;wakeBusy=true;go('home');
+ try{const rest=String(t).replace(/[\s\S]*?(?:يا\s*)?(?:سمسم|سم سم|سمسن|سيمسم|simsim)/i,'').trim();
+  if(rest.length>4)await converse(t);else{heard('<b>سمسم:</b> أيوه، سامعك… قول التذكير');await speak('أيوه، سامعك',true);await newEntry()}}
+ finally{wakeBusy=false;setTimeout(startWake,900)}}
+async function newEntry(){const r=await noteFlow();if(r==='cancel')typeSheet()}
+function typeSheet(){openSheet('<h2>تذكير جديد</h2><p class="muted">اكتبه بالوقت، مثلاً: أكلم محمد بعد نص ساعة</p><div class="form"><input id="tyI" placeholder="اكتب هنا…" autocomplete="off"><div class="row"><button class="btn sp" id="tyS">سجّل</button><button class="btn teal" id="tyV" aria-label="فويس نوت">🎙</button><button class="btn ghost" id="tyX">إلغاء</button></div></div>');
+ setTimeout(()=>{const i=$('#tyI');if(i)i.focus()},100);
+ $('#tyS').onclick=()=>{const v=$('#tyI').value.trim();if(!v)return;closeSheet();$('#sayI').value=v;$('#sayF').requestSubmit()};
+ $('#tyI').onkeydown=e=>{if(e.key==='Enter')$('#tyS').click()};$('#tyV').onclick=()=>{closeSheet();noteFlow()};$('#tyX').onclick=closeSheet}
 /* ---------- conversation ---------- */
 const LIST_RE=/(ايه|إيه|ايش|اية|إية).*(مهام|ورايا|ورايه|عندي|عندى|مواعيد|المطلوب)|(مهامي|مواعيدي)/;
 async function converse(first,woke){
@@ -182,24 +195,24 @@ async function playNote(t,el){if(curAudio){try{curAudio.pause()}catch(e){}}
  if(NATIVE&&t.notePath&&(!t.note||t.note==='file')){NP.playFile({path:t.notePath}).catch(()=>toast('الفويس نوت مش موجودة'));return}
  const b=await idbGet(t.note);if(!b){if(NATIVE&&t.notePath){NP.playFile({path:t.notePath}).catch(()=>{});return}toast('الفويس نوت مش موجودة');return}const u=URL.createObjectURL(b);
  if(el){el.innerHTML='<audio controls autoplay src="'+u+'"></audio>';curAudio=el.querySelector('audio');curAudio.play().catch(()=>{})}else{curAudio=new Audio(u);curAudio.play().catch(()=>toast('دوس تاني عشان يشتغل'))}}
-let rec=null,recChunks=[],recT=0,recTimer=null,recStream=null,recSR=null,recText='';
+let rec=null,recChunks=[],recT=0,recTimer=null,recStream=null,recSR=null,recText='',recSil=null;
 $('#noteBtn').onclick=()=>noteFlow();
 /* voice note: record + understand the words, so "فكرني أشتري عيش كمان ساعة" sets the time by itself */
 async function noteFlow(dayKey){unlockAudio();
  if(NATIVE){let r=null;try{r=await NP.listenNote({language:'ar-EG',prompt:'قول الفويس نوت… مثلاً: فكرني أشتري عيش كمان ساعة'})}catch(e){r=null}
-  if(r){if(r.cancel)return;if(!r.text&&!r.path){toast('مسمعتش حاجة، جرّب تاني');return}return noteResult(r.text||'',null,r.path||null,dayKey)}}
+  if(r){if(r.cancel)return 'cancel';if(!r.text&&!r.path){toast('مسمعتش حاجة، اكتبها أحسن');return 'cancel'}return noteResult(r.text||'',null,r.path||null,dayKey)}}
  if(!navigator.mediaDevices||!window.MediaRecorder){toast('الجهاز ده مش بيدعم التسجيل');return}
  try{recStream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){toast('محتاج إذن الميكروفون عشان أسجّل');return}
  stopWake();const mt=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||'';
  rec=new MediaRecorder(recStream,mt?{mimeType:mt}:undefined);recChunks=[];recText='';rec.ondataavailable=e=>{if(e.data.size)recChunks.push(e.data)};
  rec.onstop=async()=>{recStream.getTracks().forEach(x=>x.stop());clearInterval(recTimer);const cancel=rec&&rec._cancel;const type=rec.mimeType||'audio/webm';rec=null;
-  const txt=await stopRecSR();if(cancel)return;const blob=new Blob(recChunks,{type});noteResult(txt,blob,null,dayKey)};
- rec.start();recT=0;openSheet('<h2>بسجّل… اتكلم براحتك</h2><div class="rec"><i></i><span id="recS">٠:٠٠</span></div><div class="heard" id="recTx" style="min-height:44px;text-align:center">قول مثلاً: فكرني أشتري عيش كمان ساعة</div><p class="muted" style="text-align:center">لو قلت الوقت جوه الكلام هظبطه لوحدي. لما تخلص دوس "خلصت".</p><div class="row"><button class="btn teal sp" id="recStop">خلصت</button><button class="btn ghost" id="recX">إلغاء</button></div>');
+  clearTimeout(recSil);const txt=await stopRecSR();if(cancel)return;const blob=new Blob(recChunks,{type});await noteResult(txt,blob,null,dayKey);setTimeout(startWake,800)};
+ rec.start();recT=0;openSheet('<h2>بسجّل… اتكلم براحتك</h2><div class="rec"><i></i><span id="recS" dir="ltr">٠:٠٠</span></div><div class="heard" id="recTx" style="min-height:44px;text-align:center">قول مثلاً: فكرني أشتري عيش كمان ساعة</div><p class="muted" style="text-align:center">لو قلت الوقت جوه الكلام هظبطه لوحدي. لما تخلص دوس "خلصت".</p><div class="row"><button class="btn teal sp" id="recStop">خلصت</button><button class="btn ghost" id="recK">⌨️ اكتب</button><button class="btn ghost" id="recX">إلغاء</button></div>');
  if(WebSR){try{recSR=new WebSR();recSR.lang='ar-EG';recSR.continuous=true;recSR.interimResults=true;let fin='';
-  recSR.onresult=e=>{let t='';fin='';for(const x of e.results){if(x.isFinal)fin+=x[0].transcript+' ';else t+=x[0].transcript}recText=(fin+t).trim();const el=$('#recTx');if(el)el.textContent=recText||'…'};
+  recSR.onresult=e=>{let t='';fin='';for(const x of e.results){if(x.isFinal)fin+=x[0].transcript+' ';else t+=x[0].transcript}recText=(fin+t).trim();const el=$('#recTx');if(el)el.textContent=recText||'…';clearTimeout(recSil);if(recText)recSil=setTimeout(()=>{if(rec)stopRec()},2600)};
   recSR.onerror=()=>{};recSR._done=new Promise(r=>{recSR.onend=r});recSR.start()}catch(e){recSR=null}}
  recTimer=setInterval(()=>{recT++;const el=$('#recS');if(el)el.textContent=AR(Math.floor(recT/60))+':'+arD(pad(recT%60));if(recT>=180)stopRec()},1000);
- $('#recStop').onclick=()=>stopRec();$('#recX').onclick=()=>{stopRec(true);closeSheet()}}
+ $('#recStop').onclick=()=>stopRec();$('#recX').onclick=()=>{stopRec(true);closeSheet();setTimeout(startWake,600)};$('#recK').onclick=()=>{stopRec(true);closeSheet();typeSheet()}}
 async function stopRecSR(){if(!recSR)return recText;const r=recSR;recSR=null;try{r.stop()}catch(e){}await Promise.race([r._done,new Promise(x=>setTimeout(x,1500))]);return recText}
 function stopRec(cancel){if(!rec)return;rec._cancel=!!cancel;try{rec.stop()}catch(e){}}
 function parseFor(text,dayKey){const q=smParse(text,Date.now());if(!q.at)return q;
@@ -340,7 +353,7 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  '<div class="card"><h3>الصوت والكلام</h3><div class="set"><label>سمسم يتكلم<small>يقول "بفكرك بـ…" و"تم التسجيل"</small></label><input type="checkbox" class="sw" id="sVoice"'+(s.voice?' checked':'')+'></div>'+
  '<div class="set"><label>يقول "تم التسجيل" بعد كل تذكير</label><input type="checkbox" class="sw" id="sConf"'+(s.confirm?' checked':'')+'></div>'+
  '<div class="set"><label>سرعة الكلام</label><input type="range" id="sRate" min="0.6" max="1.4" step="0.1" value="'+s.rate+'" style="width:150px"></div>'+
- (!NATIVE&&WebSR?'<div class="set"><label>"يا سمسم" وهو مفتوح<small>على الكمبيوتر: قول "يا سمسم" وبعدها الكلام من غير ما تدوس حاجة</small></label><input type="checkbox" class="sw" id="sWake"'+(s.wake?' checked':'')+'></div>':'')+
+ (canWake()?'<div class="set"><label>"يا سمسم" وهو مفتوح<small>قول "يا سمسم" ويفتحلك تذكير جديد بصوتك، أو قول الجملة كلها مرة واحدة: "يا سمسم فكرني بعد ساعة أكلم محمد".'+(NATIVE?' (وسمسم سامعك، صوت الأغاني بيتكتم عشان صفارة الميكروفون)':'')+'</small></label><input type="checkbox" class="sw" id="sWake"'+(s.wake?' checked':'')+'></div>':'')+
  '<div class="set"><label>صوت الموبايل<small>جرّب الأصوات العربي واختار أحسنها</small></label><select id="sVc" style="max-width:200px"><option value="">تلقائي</option></select></div>'+'<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+'<div class="set" style="display:block"><label>صوت مصري طبيعي (اختياري)<small>أصوات الموبايل عربي فصحى. لو عايز صوت مصري حقيقي (سلمى أو شاكر من مايكروسوفت) حط مفتاح Azure Speech المجاني هنا. من غيره سمسم هيشتغل عادي بصوت الموبايل.</small></label><div class="form"><input id="azK" placeholder="Azure Speech key" value="'+esc(s.az&&s.az.key||'')+'" dir="ltr"><div class="row"><input id="azR" placeholder="region مثلاً uaenorth" value="'+esc(s.az&&s.az.region||'')+'" dir="ltr" style="flex:1"><select id="azV" style="flex:1"><option value="ar-EG-SalmaNeural">سلمى (ست)</option><option value="ar-EG-ShakirNeural"'+(s.az&&s.az.voice==='ar-EG-ShakirNeural'?' selected':'')+'>شاكر (راجل)</option></select></div><div class="row"><button class="btn sm sp" id="azS">احفظ وجرّب</button>'+(s.az&&s.az.key?'<button class="btn sm ghost" id="azD">إلغاء الصوت المصري</button>':'')+'</div></div></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
  '<div class="card"><h3>الشكل</h3><div class="set"><label>الوضع<small>تقدر كمان تبدّل من زرار ☀️/🌙 فوق في الرئيسية</small></label><select id="sTheme"><option value="auto">تلقائي (نهاري الصبح وليلي بالليل)</option><option value="light"'+(s.theme==='light'?' selected':'')+'>نهاري ☀️</option><option value="dark"'+(s.theme==='dark'?' selected':'')+'>ليلي 🌙</option></select></div></div>'+
  '<div class="card" id="permCard"></div>'+
@@ -390,11 +403,12 @@ const SUN='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M1
 function applyTheme(){const t=curTheme();if(document.documentElement.dataset.theme!==t)document.documentElement.dataset.theme=t;const b=$('#themeBtn');if(b){b.innerHTML=t==='dark'?MOON:SUN;b.title=t==='dark'?'الوضع الليلي':'الوضع النهاري'}
  const m=document.querySelector('meta[name=theme-color]');if(m)m.content=t==='dark'?'#0b1a36':'#2f7fe0'}
 $('#themeBtn').onclick=()=>{S.set.theme=curTheme()==='dark'?'light':'dark';save();applyTheme();toast(S.set.theme==='dark'?'الوضع الليلي 🌙':'الوضع النهاري ☀️')};
-function wakeBtn(){const b=$('#listenBtn');if(NATIVE||!WebSR){b.hidden=true;return}b.textContent=S.set.wake?'🎧 سامعك':'🎧 يا سمسم';b.onclick=()=>{S.set.wake=!S.set.wake;save();wakeBtn();if(S.set.wake){unlockAudio();startWake();toast('قول "يا سمسم" وبعدها اللي عايزه')}else stopWake()}}
+function wakeUI(){const b=$('#listenBtn');if(!b)return;if(!canWake()){b.hidden=true;return}b.textContent=S.set.wake?(wakeOn?'🎧 سامعك':'🎧 يا سمسم'):'🔇 يا سمسم'}
+function wakeBtn(){const b=$('#listenBtn');wakeUI();b.onclick=()=>{S.set.wake=!S.set.wake;save();if(S.set.wake){unlockAudio();startWake();toast('قول "يا سمسم" وأنا هسمعك')}else{stopWake();toast('وقفت الاستماع')}wakeUI()}}
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopWake();else{startWake();nativeAcks();tick();render()}});
-async function boot(){applyTheme();wakeBtn();tick();render();setInterval(tick,1000);
+async function boot(){if(S.set.wakeV!==2){S.set.wake=true;S.set.wakeV=2;save()}applyTheme();wakeBtn();tick();render();setInterval(tick,1000);
  setTimeout(()=>{$('#splash').classList.add('out');setTimeout(()=>$('#splash').remove(),600)},1300);
- if(NATIVE){try{NP.addListener('ack',a=>{applyAck(a);save();render()});NP.addListener('launch',l=>onLaunch(l));const l=await NP.getLaunch();onLaunch(l);await nativeAcks();
+ if(NATIVE){try{NP.addListener('ack',a=>{applyAck(a);save();render()});NP.addListener('wake',e=>{wakeOn=false;onWake(e.text||'')});NP.addListener('wakeError',()=>{wakeOn=false;wakeUI();toast('محتاج إذن الميكروفون')});NP.addListener('launch',l=>onLaunch(l));const l=await NP.getLaunch();onLaunch(l);await nativeAcks();
    Capacitor.Plugins.App&&Capacitor.Plugins.App.addListener('resume',()=>nativeAcks());
    const st=await NP.status();if(!st.notifications)NP.requestNotif()}catch(e){}nsched()}
  else if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});

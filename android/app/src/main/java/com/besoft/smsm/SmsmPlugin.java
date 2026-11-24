@@ -4,6 +4,11 @@ import android.Manifest;
 import android.app.Activity;
 import android.media.MediaPlayer;
 import android.speech.RecognizerIntent;
+import android.speech.RecognitionListener;
+import android.speech.SpeechRecognizer;
+import android.media.AudioManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.speech.tts.Voice;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.annotation.ActivityCallback;
@@ -487,9 +492,149 @@ public class SmsmPlugin extends Plugin {
         }).start();
     }
 
+
+    /* ---------- "يا سمسم": listen while the app is open ---------- */
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private SpeechRecognizer wakeSr;
+    private boolean wakeOn, wakePaused, muted;
+    private int wakeErrors;
+
+    @PluginMethod
+    public void wakeStart(PluginCall call) {
+        main.post(() -> {
+            if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+                call.reject("no_recognizer");
+                return;
+            }
+            wakeOn = true;
+            wakeErrors = 0;
+            if (!wakePaused) cycle();
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void wakeStop(PluginCall call) {
+        main.post(() -> {
+            wakeOn = false;
+            killWake();
+            call.resolve();
+        });
+    }
+
+    /** The recognizer beeps every time it starts; keep the phone quiet while we wait for "يا سمسم". */
+    private void mute(boolean on) {
+        if (muted == on) return;
+        AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+        int dir = on ? AudioManager.ADJUST_MUTE : AudioManager.ADJUST_UNMUTE;
+        for (int st : new int[]{AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM}) {
+            try { am.adjustStreamVolume(st, dir, 0); } catch (Exception ignored) {}
+        }
+        muted = on;
+    }
+
+    private void killWake() {
+        main.removeCallbacksAndMessages(null);
+        if (wakeSr != null) {
+            try { wakeSr.cancel(); } catch (Exception ignored) {}
+            try { wakeSr.destroy(); } catch (Exception ignored) {}
+            wakeSr = null;
+        }
+        mute(false);
+    }
+
+    static boolean saysName(String t) {
+        if (t == null) return false;
+        String n = t.replace("أ", "ا").replace("إ", "ا").replace("ة", "ه");
+        return n.matches("(?s).*(سمسم|سم سم|سمسن|سيمسم|سمسمه|سمسمة|simsim|sim sim).*");
+    }
+
+    private void cycle() {
+        if (!wakeOn || wakePaused) return;
+        try {
+            if (wakeSr == null) {
+                wakeSr = SpeechRecognizer.createSpeechRecognizer(getContext());
+                wakeSr.setRecognitionListener(new RecognitionListener() {
+                    @Override public void onReadyForSpeech(Bundle b) { wakeErrors = 0; }
+                    @Override public void onBeginningOfSpeech() {}
+                    @Override public void onRmsChanged(float v) {}
+                    @Override public void onBufferReceived(byte[] b) {}
+                    @Override public void onEndOfSpeech() {}
+                    @Override public void onEvent(int t, Bundle b) {}
+                    @Override public void onPartialResults(Bundle b) {}
+                    @Override public void onResults(Bundle b) {
+                        if (!check(b, true)) main.postDelayed(SmsmPlugin.this::cycle, 150);
+                    }
+                    @Override public void onError(int e) {
+                        if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                            wakeOn = false;
+                            killWake();
+                            notifyListeners("wakeError", new JSObject().put("error", "mic"));
+                            return;
+                        }
+                        if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT || ++wakeErrors > 6) {
+                            if (wakeSr != null) { try { wakeSr.destroy(); } catch (Exception ignored) {} wakeSr = null; }
+                        }
+                        main.postDelayed(SmsmPlugin.this::cycle, wakeErrors > 6 ? 3000 : 300);
+                    }
+                });
+            }
+            mute(true);
+            Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG");
+            i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+            i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
+            wakeSr.startListening(i);
+        } catch (Exception e) {
+            main.postDelayed(this::cycle, 2000);
+        }
+    }
+
+    private boolean check(Bundle b, boolean fin) {
+        if (!wakeOn) return true;
+        ArrayList<String> m = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        if (m == null) return false;
+        for (String t : m) {
+            if (saysName(t)) {
+                if (!fin) {
+                    // wait for the full sentence ("يا سمسم فكرني ...") unless it is just the name
+                    String rest = t.replaceAll("(?s).*?(سمسم|سم سم|سمسن|سيمسم|simsim)", "").trim();
+                    if (rest.length() > 0) return true;
+                }
+                wakeOn = false;
+                killWake();
+                notifyListeners("wake", new JSObject().put("text", t));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    protected void handleOnPause() {
+        super.handleOnPause();
+        wakePaused = true;
+        main.post(() -> {
+            if (wakeSr != null) { try { wakeSr.destroy(); } catch (Exception ignored) {} wakeSr = null; }
+            mute(false);
+        });
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        wakePaused = false;
+        main.postDelayed(this::cycle, 600);
+    }
+
     @Override
     protected void handleOnDestroy() {
         stopPlayer();
+        wakeOn = false;
+        killWake();
         if (tts != null) {
             try { tts.shutdown(); } catch (Exception ignored) {}
             tts = null;
