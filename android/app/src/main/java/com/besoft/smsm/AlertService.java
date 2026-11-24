@@ -195,6 +195,17 @@ public class AlertService extends Service {
         final String file = it.optString("file");
         final boolean hasNote = "note".equals(sound) && file.length() > 0 && new File(file).exists();
         afterSpeech = hasNote ? () -> playFile(file, true) : null;
+        org.json.JSONArray steps = it.optJSONArray("steps");
+        if (steps != null && steps.length() > 0 && it.optString("speechFile").length() == 0) {
+            stepList = steps;
+            stepIndex = 0;
+            stepRate = (float) it.optDouble("rate", 1.0);
+            voiceName = it.optString("voice");
+            afterSpeech = null;
+            armTimeout(4 * 60 * 1000);
+            nextStep();
+            return;
+        }
         String clip = it.optString("speechFile");
         if (clip.length() > 0 && new File(clip).exists()) {
             playFile(clip, !hasNote);
@@ -214,6 +225,52 @@ public class AlertService extends Service {
     }
 
     private String voiceName = "";
+    private org.json.JSONArray stepList;
+    private int stepIndex;
+    private float stepRate = 1f;
+
+    /** Recorded clips ("بفكّرك") and spoken text (the task itself), one after the other. */
+    private void nextStep() {
+        if (stepList == null || stepIndex >= stepList.length()) {
+            stepList = null;
+            finishCurrent();
+            return;
+        }
+        JSONObject st = stepList.optJSONObject(stepIndex++);
+        if (st == null) {
+            nextStep();
+            return;
+        }
+        String a = st.optString("a");
+        if (a.length() > 0) {
+            try {
+                releasePlayer();
+                android.content.res.AssetFileDescriptor afd = getAssets().openFd(a);
+                player = new MediaPlayer();
+                player.setAudioAttributes(attrs);
+                player.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+                afd.close();
+                player.setOnCompletionListener(mp -> handler.post(this::nextStep));
+                player.setOnErrorListener((mp, w, e) -> {
+                    handler.post(this::nextStep);
+                    return true;
+                });
+                player.prepare();
+                player.start();
+            } catch (Exception e) {
+                releasePlayer();
+                handler.post(this::nextStep);
+            }
+            return;
+        }
+        String t = st.optString("t");
+        if (t.length() == 0) {
+            nextStep();
+            return;
+        }
+        afterSpeech = this::nextStep;
+        speak(t, stepRate);
+    }
 
     /** last=true: the reminder is over when this file ends; otherwise go on to the voice note. */
     private void playFile(String path, boolean last) {
@@ -324,6 +381,7 @@ public class AlertService extends Service {
         if (timeout != null) handler.removeCallbacks(timeout);
         timeout = null;
         afterSpeech = null;
+        stepList = null;
         releasePlayer();
         pendingSpeech = null;
         if (tts != null) {

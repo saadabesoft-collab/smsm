@@ -427,6 +427,28 @@ public class SmsmPlugin extends Plugin {
         }
     }
 
+    /** Play one of the recorded voice clips bundled with the app; resolves when it ends. */
+    @PluginMethod
+    public void playAsset(PluginCall call) {
+        String path = call.getString("path", "");
+        stopPlayer();
+        try {
+            android.content.res.AssetFileDescriptor afd = getContext().getAssets().openFd(path);
+            player = new MediaPlayer();
+            player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+            player.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            afd.close();
+            playCall = call;
+            player.setOnCompletionListener(mp -> stopPlayer());
+            player.setOnErrorListener((mp, w, e) -> { stopPlayer(); return true; });
+            player.prepare();
+            player.start();
+        } catch (Exception e) {
+            stopPlayer();
+            call.resolve();
+        }
+    }
+
     @PluginMethod
     public void stopFile(PluginCall call) {
         stopPlayer();

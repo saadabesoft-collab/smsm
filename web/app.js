@@ -67,6 +67,36 @@ async function speak(text,force){if((!S.set.voice&&!force)||!text)return;if(NATI
  if(NATIVE){try{await NP.speak({text,rate:S.set.rate,voice:S.set.voiceName||''})}catch(e){}return}
  if(!('speechSynthesis'in window))return;
  await new Promise(res=>{try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=arVoice?arVoice.lang:'ar-EG';if(arVoice)u.voice=arVoice;u.rate=S.set.rate;u.onend=u.onerror=()=>res();speechSynthesis.speak(u);setTimeout(res,Math.min(15000,1500+text.length*120))}catch(e){res()}})}
+/* ---------- recorded Egyptian voice (حازم): ready-made sentences glued together ---------- */
+const CLIP_TEXT={saved:'تمام، اتسجّلت.',hearing:'أيوه، سامعك.',ask_what:'أفكّرك بإيه؟',ask_when:'إمتى أفكّرك؟',not_understood:'معلش مفهمتش، قولها تاني.',will_remind:'هفكّرك',remind:'بفكّرك',
+ voice_note:'عندك فويس نوت، افتحها واسمعها.',bravo:'عاش يا بطل!',moved:'تمام، نقلتهم لبكرة.',day_left:'خلص اليوم. فيه مهام ما اتعملتش، تحب أنقلها لبكرة؟',day_all:'خلص اليوم، وخلّصت كل مهامك. عاش!',
+ hello:'أهلاً، أنا سمسم. قولّي أفكّرك بإيه، وأنا هفكّرك في معاده.',empty_today:'النهارده مفيش حاجة متسجلة.',empty_tomorrow:'بكرة مفيش حاجة متسجلة.',today_list:'دي مهامك النهارده:',tomorrow_list:'دي مهامك بكرة:',name:'يا سعادة،',
+ rel_5:'بعد خمس دقايق',rel_10:'بعد عشر دقايق',rel_15:'بعد ربع ساعة',rel_20:'بعد تلت ساعة',rel_30:'بعد نص ساعة',rel_45:'بعد تلت ارباع ساعة',rel_60:'بعد ساعة',rel_90:'بعد ساعة ونص',rel_120:'بعد ساعتين',rel_180:'بعد تلات ساعات',
+ day_today:'النهارده',day_tomorrow:'بكرة',day_after:'بعد بكرة',wd_0:'يوم الحد',wd_1:'يوم الاتنين',wd_2:'يوم التلات',wd_3:'يوم الأربع',wd_4:'يوم الخميس',wd_5:'يوم الجمعة',wd_6:'يوم السبت',every_day:'كل يوم',every_week:'كل أسبوع',
+ h_1:'الساعة واحدة',h_2:'الساعة اتنين',h_3:'الساعة تلاتة',h_4:'الساعة أربعة',h_5:'الساعة خمسة',h_6:'الساعة ستة',h_7:'الساعة سبعة',h_8:'الساعة تمانية',h_9:'الساعة تسعة',h_10:'الساعة عشرة',h_11:'الساعة حداشر',h_12:'الساعة اتناشر',
+ m_5:'وخمسة',m_10:'وعشرة',m_15:'وربع',m_20:'وتلت',m_25:'ونص إلا خمسة',m_30:'ونص',m_35:'ونص وخمسة',m_40:'إلا تلت',m_45:'إلا ربع',m_50:'إلا عشرة',m_55:'إلا خمسة',
+ p_morning:'الصبح',p_noon:'الضهر',p_afternoon:'العصر',p_maghrib:'المغرب',p_night:'بالليل'};
+const CLIPS=new Set(window.SM_CLIPS||[]);
+const clipsOn=()=>S.set.clips!==false&&CLIPS.size>0&&!cloudOn();
+const isMe=()=>/سعاد[ةه]/.test(S.set.name||'');
+const nameParts=()=>!S.set.name?[]:(isMe()&&CLIPS.has('name'))?['name']:clipsOn()?[]:[{t:'يا '+S.set.name+'،'}];
+function perClip(H){return H<4?'p_night':H<12?'p_morning':H<15?'p_noon':H<18?'p_afternoon':H<20?'p_maghrib':'p_night'}
+/* "بكرة الساعة تلاتة ونص العصر" as clips, or null if it can't be built from them */
+function whenClips(t){const at=new Date(t.at),now=Date.now(),mins=Math.round((t.at-now)/6e4);
+ if(!t.rep&&!t.dayOnly&&dk(at)===dk(new Date())){for(const r of [5,10,15,20,30,45,60,90,120,180])if(Math.abs(mins-r)<=1)return['rel_'+r]}
+ const out=[];if(t.rep==='d')out.push('every_day');else if(t.rep==='w')out.push('every_week','wd_'+at.getDay());
+ else{const diff=Math.round((fromDk(dk(at))-fromDk(dk(new Date())))/864e5);if(diff===0)out.push('day_today');else if(diff===1)out.push('day_tomorrow');else if(diff===2)out.push('day_after');else if(diff>2&&diff<7)out.push('wd_'+at.getDay());else return null}
+ let H=at.getHours(),M=at.getMinutes();if(M%5)return null;let mc=M?'m_'+M:null;if(M>=40)H=(H+1)%24;const h=H%12||12;out.push('h_'+h);if(mc)out.push(mc);out.push(perClip(H));return out}
+function confirmParts(t){const w=whenClips(t);const tx=t.text&&t.text!=='فويس نوت'?[{t:t.text}]:[];return w?['saved','will_remind',...w,...tx]:['saved',{t:'هفكرك '+speakWhen(t)+(tx.length?'، '+t.text:'')}]}
+function remParts(t){return[...nameParts(),...(t.note&&(!t.text||t.text==='فويس نوت')?['voice_note']:['remind',{t:t.text}])]}
+const partsText=parts=>parts.map(x=>typeof x==='string'?CLIP_TEXT[x]:x.t).join(' ');
+let clipAudio=null;
+function playClip(id){return new Promise(res=>{if(NATIVE){NP.playAsset({path:'public/voice/'+id+'.mp3'}).then(res,res);return}
+ try{clipAudio=new Audio('voice/'+id+'.mp3');clipAudio.onended=clipAudio.onerror=()=>res();clipAudio.play().catch(()=>res());setTimeout(res,8000)}catch(e){res()}})}
+async function say(parts,force){if((!S.set.voice&&!force)||!parts||!parts.length)return;
+ if(!clipsOn()||parts.some(x=>typeof x==='string'&&!CLIPS.has(x)))return speak(partsText(parts),force);
+ if(NATIVE&&wakeOn){stopWake();setTimeout(startWake,5000)}
+ for(const x of parts){if(typeof x==='string')await playClip(x);else if(x.t)await speak(x.t,force)}}
 /* the sentence said when a reminder rings */
 const remLine=t=>(S.set.name?'يا '+S.set.name+'، ':'')+(t.note&&(!t.text||t.text==='فويس نوت')?'عندك فويس نوت، افتحها واسمعها':'بفكرك: '+t.text);
 /* with the Azure voice on, prepare the reminder sentence as a file so the phone can play it while the app is closed */
@@ -105,7 +135,7 @@ function stopWake(){if(NATIVE){if(wakeOn){wakeOn=false;NP.wakeStop().catch(()=>{
 /* heard "يا سمسم": a whole sentence is handled right away, the name alone opens a new reminder */
 async function onWake(t){stopWake();if(wakeBusy)return;wakeBusy=true;go('home');
  try{const rest=String(t).replace(/[\s\S]*?(?:يا\s*)?(?:سمسم|سم سم|سمسن|سيمسم|simsim)/i,'').trim();
-  if(rest.length>4)await converse(t);else{heard('<b>سمسم:</b> أيوه، سامعك… قول التذكير');await speak('أيوه، سامعك',true);await newEntry()}}
+  if(rest.length>4)await converse(t);else{heard('<b>سمسم:</b> أيوه، سامعك… قول التذكير');await say(['hearing'],true);await newEntry()}}
  finally{wakeBusy=false;setTimeout(startWake,900)}}
 async function newEntry(){const r=await noteFlow();if(r==='cancel')typeSheet()}
 function typeSheet(){openSheet('<h2>تذكير جديد</h2><p class="muted">اكتبه بالوقت، مثلاً: أكلم محمد بعد نص ساعة</p><div class="form"><input id="tyI" placeholder="اكتب هنا…" autocomplete="off"><div class="row"><button class="btn sp" id="tyS">سجّل</button><button class="btn teal" id="tyV" aria-label="فويس نوت">🎙</button><button class="btn ghost" id="tyX">إلغاء</button></div></div>');
@@ -116,20 +146,20 @@ function typeSheet(){openSheet('<h2>تذكير جديد</h2><p class="muted">ا�
 const LIST_RE=/(ايه|إيه|ايش|اية|إية).*(مهام|ورايا|ورايه|عندي|عندى|مواعيد|المطلوب)|(مهامي|مواعيدي)/;
 async function converse(first,woke){
  let text=first;
- if(!text){if(woke)await speak('أيوه، أنا سامعك');text=await listen('مثلاً: فكرني بعد نص ساعة أكلم محمد')}
+ if(!text){if(woke)await say(['hearing']);text=await listen('مثلاً: فكرني بعد نص ساعة أكلم محمد')}
  if(!text){heard('');return}
  heard('<b>إنت:</b> '+esc(text));
  const nb=smNorm(smBase(text));
  if(LIST_RE.test(nb)&&!/فكرني|ذكرني|نبهني/.test(nb)){const tom=/بكر[اه]|غدا/.test(nb);const d=tom?addDays(new Date(),1):new Date();const l=tasksOn(dk(d)).filter(t=>!t.done);
   const msg=l.length?(tom?'بكرة ':'النهارده ')+'عندك '+l.length+(l.length<11&&l.length>2?' مهام':' مهمة')+': '+l.map(t=>t.text+' '+sayTime(t.at)).join('، '):(tom?'بكرة':'النهارده')+' مفيش حاجة متسجلة';
-  heard('<b>سمسم:</b> '+esc(msg));await speak(msg);return}
+  heard('<b>سمسم:</b> '+esc(msg));await say(l.length?[tom?'tomorrow_list':'today_list',{t:l.map(t=>t.text+' '+sayTime(t.at)).join('، ')}]:[tom?'empty_tomorrow':'empty_today']);return}
  let p=smParse(text);
- if(!p.text){await speak('أفكرك بإيه؟');const t2=await listen('أفكرك بإيه؟');if(!t2){heard('');return}const q=smParse(t2);p.text=q.text||t2;if(!p.at&&q.at){p.at=q.at;p.hasTime=q.hasTime;p.dayOnly=q.dayOnly}}
- if(!p.at){await speak('إمتى أفكرك؟');const t3=await listen('إمتى؟ مثلاً: بعد ساعة، بكرة الساعة ٥');const q=t3?smParse(t3):null;if(!q||!q.at){heard('<b>سمسم:</b> ملحقتش أفهم الوقت. قولها تاني أو اكتبها');await speak('معلش مفهمتش الوقت، قولها تاني');return}p.at=q.at;p.dayOnly=q.dayOnly;if(q.rep)p.rep=q.rep}
+ if(!p.text){await say(['ask_what']);const t2=await listen('أفكرك بإيه؟');if(!t2){heard('');return}const q=smParse(t2);p.text=q.text||t2;if(!p.at&&q.at){p.at=q.at;p.hasTime=q.hasTime;p.dayOnly=q.dayOnly}}
+ if(!p.at){await say(['ask_when']);const t3=await listen('إمتى؟ مثلاً: بعد ساعة، بكرة الساعة ٥');const q=t3?smParse(t3):null;if(!q||!q.at){heard('<b>سمسم:</b> ملحقتش أفهم الوقت. قولها تاني أو اكتبها');await say(['not_understood']);return}p.at=q.at;p.dayOnly=q.dayOnly;if(q.rep)p.rep=q.rep}
  const t=addTask({text:p.text,at:p.at,dayOnly:p.dayOnly,rep:p.rep,src:'voice'});
  const msg='تم التسجيل. هفكرك '+speakWhen(t)+'، '+t.text;
  heard('<b>سمسم:</b> '+esc('تمام، اتسجلت. هفكرك '+speakWhen(t)));
- if(S.set.confirm)await speak(msg);}
+ if(S.set.confirm)await say(confirmParts(t));}
 
 function addTask(o){const t={id:uid(),text:o.text.trim()||'تذكير',at:o.at,dayOnly:!!o.dayOnly,rep:o.rep||null,note:o.note||null,notePath:o.notePath||null,done:false,snz:0,src:o.src||'text',created:Date.now()};S.tasks.push(t);save();render();return t}
 
@@ -137,7 +167,7 @@ function addTask(o){const t={id:uid(),text:o.text.trim()||'تذكير',at:o.at,d
 $('#sayF').addEventListener('submit',async e=>{e.preventDefault();const v=$('#sayI').value.trim();if(!v)return;const p=smParse(v);
  if(!p.text){toast('اكتب الحاجة اللي عايز تفتكرها');return}
  if(!p.at){p.at=Date.now()+30*6e4;toast('محددتش وقت، هفكرك بعد نص ساعة — تقدر تعدّل')}
- const t=addTask({text:p.text,at:p.at,dayOnly:p.dayOnly,rep:p.rep});$('#sayI').value='';toast('تم التسجيل '+speakWhen(t));if(S.set.confirm)speak('تم التسجيل')});
+ const t=addTask({text:p.text,at:p.at,dayOnly:p.dayOnly,rep:p.rep});$('#sayI').value='';toast('تم التسجيل '+speakWhen(t));if(S.set.confirm)say(confirmParts(t))});
 $('#talk').onclick=()=>{if(listening)return;unlockAudio();converse()};
 const EX=['فكرني بعد نص ساعة أكلم محمد','فكرني كمان ساعتين أشتري عيش','فكرني بكرة الساعة ١٠ الصبح بالاجتماع','فكرني كل يوم الساعة ٩ بالليل أخد الدوا','فكرني يوم ١٥ ديسمبر عيد ميلاد مراتي','إيه ورايا النهارده؟'];
 $('#ex').innerHTML=EX.map(x=>'<button type="button">'+esc(x)+'</button>').join('');
@@ -228,7 +258,7 @@ async function saveNote(o){let note=null,path=o.path||null;
  if(o.blob){note='n'+uid();await idbPut(note,o.blob);if(NATIVE&&!path){try{const b64=await blobB64(o.blob);const r=await NP.saveAudio({name:note+(o.blob.type.includes('mp4')?'.m4a':o.blob.type.includes('ogg')?'.ogg':'.webm'),data:b64});path=r.path}catch(e){}}}
  else if(path)note='file';
  const t=addTask({text:o.text||'فويس نوت',at:o.at,dayOnly:o.dayOnly,rep:o.rep,note,notePath:path,src:'note'});
- const m='تم التسجيل. هفكرك '+speakWhen(t)+(t.text!=='فويس نوت'?'، '+t.text:'');toast('تمام، هفكرك '+speakWhen(t)+(note?' بالفويس نوت':''));if(S.set.confirm)speak(m);return t}
+ const m='تم التسجيل. هفكرك '+speakWhen(t)+(t.text!=='فويس نوت'?'، '+t.text:'');toast('تمام، هفكرك '+speakWhen(t)+(note?' بالفويس نوت':''));if(S.set.confirm)say(confirmParts(t));return t}
 async function noteResult(text,blob,path,dayKey){closeSheet();
  if(text)heard('<b>سمعتك:</b> '+esc(text));
  const q=text?parseFor(text,dayKey):null;
@@ -253,26 +283,27 @@ function engine(){if(popT&&$('#pop').classList.contains('on')){const t=findT(pop
  const now=Date.now();const due=S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at<=now&&t.at>now-12*3600e3&&(!t.ringAt||now-t.ringAt>=S.set.repeat*6e4)).sort((a,b)=>a.at-b.at)[0];
  if(due){due.ringAt=now;save();showPop(due);ring(due)}}
 function ring(t){const msg=remLine(t);if(document.hidden&&'Notification'in window&&Notification.permission==='granted'){try{const n=new Notification('سمسم بيفكرك',{body:t.text,icon:'icon-192.png',tag:t.id,requireInteraction:true});n.onclick=()=>{window.focus();n.close()}}catch(e){}}
- speak(msg)}
+ say(remParts(t))}
 function showPop(t){popT=t.id;const late=Math.round((Date.now()-t.at)/6e4);
  $('#pop').innerHTML='<div class="pc"><div class="ph"><svg viewBox="0 0 512 512"><use href="#genie"/></svg><p>سمسم بيفكرك</p></div><div class="pb"><div class="muted">بفكرك بـ</div><h2>'+esc(t.text)+'</h2><div class="tl">'+(t.dayOnly?'النهارده':showTime(t.at)+' '+ampm(t.at))+(late>1?' — من '+AR(late)+' دقيقة':'')+(t.snz?' · اتأجل '+AR(t.snz)+' مرة':'')+'</div>'+(t.note?'<button class="btn ghost" id="pPlay" style="margin-top:12px;width:100%">▶ اسمع الفويس نوت</button>':'')+'<div id="popAud"></div>'+
  '<div class="pact"><button class="btn ok" id="pOk">تم</button><div class="muted">أو أجّل:</div><div class="snz">'+S.set.snooze.map(m=>'<button data-m="'+m+'">'+minLabel(m)+'</button>').join('')+'</div></div></div></div>';
  $('#pop').classList.add('on');if($('#pPlay'))$('#pPlay').onclick=()=>{if('speechSynthesis'in window)speechSynthesis.cancel();$('#pPlay').remove();playNote(t,$('#popAud'))};
- $('#pOk').onclick=()=>{markDone(t);hidePop();speak('عاش يا بطل');};
+ $('#pOk').onclick=()=>{markDone(t);hidePop();say(['bravo']);};
  $('#pop').querySelector('.snz').onclick=e=>{const b=e.target.closest('[data-m]');if(!b)return;snooze(t,+b.dataset.m);hidePop();toast('هفكرك تاني بعد '+minLabel(+b.dataset.m))}}
 function hidePop(){$('#pop').classList.remove('on');popT=null;if(curAudio)curAudio.pause();if('speechSynthesis'in window)speechSynthesis.cancel()}
 let unlocked=false;function unlockAudio(){if(unlocked)return;unlocked=true;try{const a=new Audio();a.muted=true;a.play().catch(()=>{})}catch(e){}if('Notification'in window&&Notification.permission==='default')Notification.requestPermission().catch(()=>{})}
 
 /* ---------- native schedule ---------- */
+function nsteps(parts){if(!clipsOn()||parts.some(x=>typeof x==='string'&&!CLIPS.has(x)))return null;return parts.map(x=>typeof x==='string'?{a:'public/voice/'+x+'.mp3'}:{t:egSay(x.t)})}
 function nsched(){if(!NATIVE)return;setTimeout(ensureClips,50);const now=Date.now(),items=[];
  S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at>now-12*3600e3).sort((a,b)=>a.at-b.at).slice(0,120).forEach(t=>{
   items.push({id:hid(t.id),key:okey(t),task:t.id,time:Math.max(t.at,now+3000),exp:t.at+12*3600e3,title:'سمسم بيفكرك',body:t.text,persistent:true,repeat:S.set.repeat,
-   sound:S.set.voice?'tts':'none',file:'',noteFile:t.notePath||'',speech:egSay(remLine(t)),speechFile:(t.vclip&&t.vclip.line===egSay(remLine(t)))?t.vclip.path:'',voice:S.set.voiceName||'',
+   sound:S.set.voice?'tts':'none',file:'',noteFile:t.notePath||'',steps:nsteps(remParts(t)),speech:egSay(remLine(t)),speechFile:(t.vclip&&t.vclip.line===egSay(remLine(t)))?t.vclip.path:'',voice:S.set.voiceName||'',
    when:t.dayOnly?'النهارده':showTime(t.at)+' '+ampm(t.at),snooze:S.set.snooze,snDef:S.set.snDef,rate:S.set.rate,kind:'task'})});
  // day close
  const b=boundary(addDays(fromDk(logicalDay()),1));const left=S.tasks.filter(t=>!t.done&&!t.closed&&!t.missed&&t.at<b.getTime()).length;
  items.push({id:hid('close'+dk(b)),key:'close:'+dk(b),time:b.getTime()+5000,exp:b.getTime()+6*3600e3,title:'سمسم — تقرير اليوم',body:left?'فاضل '+left+' مهام ما خلصتش. تنقلها لبكرة؟':'خلّصت كل مهام النهارده 👏',persistent:false,repeat:0,sound:S.set.voice?'tts':'none',
-  speech:egSay('خلص اليوم'+(S.set.name?' يا '+S.set.name:'')+'. '+(left?'فاضل '+left+' مهام ما خلصتش. افتح سمسم تشوف التقرير وتنقلها لبكرة':'خلصت كل مهام النهارده، عاش')),kind:'close',rate:S.set.rate,voice:S.set.voiceName||''});
+  speech:egSay('خلص اليوم'+(S.set.name?' يا '+S.set.name:'')+'. '+(left?'فاضل '+left+' مهام ما خلصتش. افتح سمسم تشوف التقرير وتنقلها لبكرة':'خلصت كل مهام النهارده، عاش')),kind:'close',rate:S.set.rate,voice:S.set.voiceName||'',steps:nsteps([...nameParts(),left?'day_left':'day_all'])});
  NP.schedule({items}).catch(()=>{})}
 async function nativeAcks(){if(!NATIVE)return;try{const r=await NP.getAcks();(r.acks||[]).forEach(applyAck);save();render()}catch(e){}}
 function applyAck(a){if(!a||!a.key)return;if(a.key.startsWith('close:')){if(a.act==='open')go('rep');return}const id=a.key.split(':')[0],t=findT(id);if(!t)return;
@@ -297,11 +328,11 @@ function showReport(rp,fresh){const all=rp.done.length+rp.left.length,p=all?Math
  (rp.done.length?'<h3 style="margin-top:14px;color:var(--ok)">اتعملت</h3>'+rp.done.map(x=>'<div class="muted">• '+esc(x.text)+'</div>').join(''):'')+
  (rp.left.length?'<h3 style="margin-top:12px;color:var(--warn)">✗ ما اتعملتش</h3>'+rp.left.map(x=>'<label class="row muted" style="padding:4px 0"><input type="checkbox" class="mv" value="'+x.id+'"'+(movable.find(m=>m.id===x.id)?' checked':' disabled')+'> '+esc(x.text)+'</label>').join(''):'')+
  (movable.length?'<div class="card" style="background:var(--soft);border:0"><b>هل تريد نقل المهام التي لم يتم إنجازها '+(tgtK===dk(addDays(new Date(),1))?'لبكرة':'للنهارده')+'؟</b><div class="muted">هتتنقل على يوم '+WD[fromDk(tgtK).getDay()]+' '+AR(fromDk(tgtK).getDate())+' '+MONTHS[fromDk(tgtK).getMonth()]+' بنفس مواعيدها</div><div class="row" style="margin-top:10px"><button class="btn sp" id="mvY">أيوه، انقلها</button><button class="btn ghost" id="mvN">لا</button></div></div>':'<div class="row" style="margin-top:14px"><button class="btn sp" id="mvN">تمام</button></div>'));
- if(fresh&&movable.length)speak('خلص اليوم. فاضل '+movable.length+' مهام ما اتعملتش. تحب أنقلها لبكرة؟');
+ if(fresh&&movable.length)say(['day_left']);
  if($('#mvY'))$('#mvY').onclick=()=>{const ids=$$('.mv:checked').map(x=>x.value);const target=fromDk(tgtK);let n=0;
   ids.forEach(id=>{const t=findT(id);if(!t||t.done||t.rep)return;const o=new Date(t.at),nd=new Date(target);nd.setHours(t.dayOnly?9:o.getHours(),t.dayOnly?0:o.getMinutes(),0,0);
    const c={...t,id:uid(),at:nd.getTime(),closed:false,missed:false,done:false,ringAt:null,snz:0,moved:true,created:Date.now()};S.tasks.push(c);t.movedTo=c.id;n++});
-  rp.ask=false;save();render();closeSheet();toast('اتنقلت '+AR(n)+' مهام');speak('تمام، نقلتهم')};
+  rp.ask=false;save();render();closeSheet();toast('اتنقلت '+AR(n)+' مهام');say(['moved'])};
  $('#mvN').onclick=()=>{rp.ask=false;rp.left.forEach(x=>{const t=findT(x.id);if(t&&!t.movedTo)t.missed=true});save();closeSheet()}}
 
 /* ---------- calendar ---------- */
@@ -324,10 +355,10 @@ function renderCal(){const cm=countMap();$('#calMode').textContent=calYear?'عر
  $$('.cal [data-k]').forEach(b=>b.onclick=()=>{calSel=b.dataset.k;renderCal()});
  $('#cToday').onclick=()=>{const n=new Date();calY=n.getFullYear();calM=n.getMonth();calSel=dk(n);renderCal()};
  $('#cA').onclick=()=>{const tx=$('#cT').value.trim();if(!tx){toast('اكتب التذكير الأول');return}const[H,M]=($('#cW').value||'09:00').split(':').map(Number);const d=fromDk(calSel);d.setHours(H,M,0,0);
-  const t=addTask({text:tx,at:d.getTime(),rep:$('#cR').value||null,src:'cal'});toast('اتسجّل '+dayWord(t.at)+' '+sayTime(t.at));if(S.set.confirm)speak('تم التسجيل')};
+  const t=addTask({text:tx,at:d.getTime(),rep:$('#cR').value||null,src:'cal'});toast('اتسجّل '+dayWord(t.at)+' '+sayTime(t.at));if(S.set.confirm)say(confirmParts(t))};
  if($('#cV'))$('#cV').onclick=async()=>{const t=await listen('قول التذكير ووقته');if(!t)return;const d=fromDk(calSel);d.setHours(12);const p=smParse(t,d.getTime()-12*3600e3+1);let at=p.at;
   if(!at||dk(at)!==calSel){const x=new Date(at||d);const y=fromDk(calSel);y.setHours(p.hasTime?x.getHours():9,p.hasTime?x.getMinutes():0,0,0);at=y.getTime()}
-  if(!p.text){toast('مفهمتش التذكير، اكتبه');return}const tk=addTask({text:p.text,at,rep:p.rep,src:'voice'});const m='تم التسجيل. هفكرك '+dayWord(tk.at)+' '+sayTime(tk.at);toast(m);if(S.set.confirm)speak(m)};
+  if(!p.text){toast('مفهمتش التذكير، اكتبه');return}const tk=addTask({text:p.text,at,rep:p.rep,src:'voice'});const m='تم التسجيل. هفكرك '+dayWord(tk.at)+' '+sayTime(tk.at);toast(m);if(S.set.confirm)say(confirmParts(tk))};
  $('#cN').onclick=()=>noteFlow(calSel)}
 $('#calMode').onclick=()=>{calYear=!calYear;renderCal()};
 
@@ -361,7 +392,7 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  '<div class="set"><label>يقول "تم التسجيل" بعد كل تذكير</label><input type="checkbox" class="sw" id="sConf"'+(s.confirm?' checked':'')+'></div>'+
  '<div class="set"><label>سرعة الكلام</label><input type="range" id="sRate" min="0.6" max="1.4" step="0.1" value="'+s.rate+'" style="width:150px"></div>'+
  (canWake()?'<div class="set"><label>"يا سمسم" وهو مفتوح<small>قول "يا سمسم" ويفتحلك تذكير جديد بصوتك، أو قول الجملة كلها مرة واحدة: "يا سمسم فكرني بعد ساعة أكلم محمد".'+(NATIVE?' (وسمسم سامعك، صوت الأغاني بيتكتم عشان صفارة الميكروفون)':'')+'</small></label><input type="checkbox" class="sw" id="sWake"'+(s.wake?' checked':'')+'></div>':'')+
- '<div class="set"><label>صوت الموبايل<small>جرّب الأصوات العربي واختار أحسنها</small></label><select id="sVc" style="max-width:200px"><option value="">تلقائي</option></select></div>'+'<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+'<div class="set" style="display:block" id="cloudBox"></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
+ (CLIPS.size?'<div class="set"><label>صوت حازم المصري<small>سمسم بيتكلم بصوت مصري مسجّل في الجمل الثابتة (تمام اتسجلت، بفكرك، المواعيد…) وكلامك نفسه بصوت الموبايل</small></label><input type="checkbox" class="sw" id="sClips"'+(s.clips!==false?' checked':'')+'></div>':'')+'<div class="set"><label>صوت الموبايل<small>جرّب الأصوات العربي واختار أحسنها</small></label><select id="sVc" style="max-width:200px"><option value="">تلقائي</option></select></div>'+'<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+'<div class="set" style="display:block" id="cloudBox"></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
  '<div class="card"><h3>الشكل</h3><div class="set"><label>الوضع<small>تقدر كمان تبدّل من زرار ☀️/🌙 فوق في الرئيسية</small></label><select id="sTheme"><option value="auto">تلقائي (نهاري الصبح وليلي بالليل)</option><option value="light"'+(s.theme==='light'?' selected':'')+'>نهاري ☀️</option><option value="dark"'+(s.theme==='dark'?' selected':'')+'>ليلي 🌙</option></select></div></div>'+
  '<div class="card" id="permCard"></div>'+
  '<div class="card"><h3>تجربة</h3><div class="set"><label>جرّب تذكير بعد ١٠ ثواني<small>عشان تشوف الـ Pop-up والصوت'+(NATIVE?' — اقفل الشاشة واستنى':'')+'</small></label><button class="btn sm" id="sTest">جرّب</button></div></div>'+
@@ -372,9 +403,9 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  on('#sSn','click',e=>{const b=e.target.closest('[data-m]');if(!b)return;const m=+b.dataset.m;if(s.snooze.includes(m)){if(s.snooze.length<2)return;s.snooze=s.snooze.filter(x=>x!==m)}else s.snooze=[...s.snooze,m].sort((a,b)=>a-b);if(!s.snooze.includes(s.snDef))s.snDef=s.snooze[0];save();renderSet()});
  on('#sRep','change',e=>{s.repeat=+e.target.value;save()});on('#sSd','change',e=>{s.snDef=+e.target.value;save()});
  on('#sClose','change',e=>{s.closeH=+e.target.value;S.lastDay=logicalDay();save()});
- on('#sVoice','change',e=>{s.voice=e.target.checked;save()});on('#sConf','change',e=>{s.confirm=e.target.checked;save()});on('#sRate','change',e=>{s.rate=+e.target.value;save();speak('أهلاً، أنا سمسم')});
+ on('#sVoice','change',e=>{s.voice=e.target.checked;save()});on('#sConf','change',e=>{s.confirm=e.target.checked;save()});on('#sClips','change',e=>{s.clips=e.target.checked;save();if(s.clips)say([...nameParts(),'hello'],true)});on('#sRate','change',e=>{s.rate=+e.target.value;save();speak('أهلاً، أنا سمسم')});
  on('#sWake','change',e=>{s.wake=e.target.checked;save();if(s.wake){unlockAudio();startWake();toast('قول "يا سمسم" في أي وقت والبرنامج مفتوح')}else stopWake()});
- on('#sTry','click',()=>speak('أهلاً'+(s.name?' يا '+s.name:'')+'، أنا سمسم. قولّي فكرني بإيه، وأنا هفكرك في معاده',true));
+ on('#sTry','click',()=>say([...nameParts(),'hello'],true));
  on('#sTheme','change',e=>{s.theme=e.target.value;save();applyTheme()});
  fillVoices();
  on('#sVc','change',e=>{s.voiceName=e.target.value;save();pickVoice();speak('أهلاً، أنا سمسم. ده صوتي الجديد',true)});
