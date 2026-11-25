@@ -652,7 +652,7 @@ public class SmsmPlugin extends Plugin {
     }
 
     private void killWake() {
-        main.removeCallbacksAndMessages(null);
+        if (!lactive) main.removeCallbacksAndMessages(null);
         if (wakeSr != null) {
             try { wakeSr.cancel(); } catch (Exception ignored) {}
             try { wakeSr.destroy(); } catch (Exception ignored) {}
@@ -730,11 +730,160 @@ public class SmsmPlugin extends Plugin {
         return false;
     }
 
+    /* ---------- long listening: keeps going across pauses until you stop talking ---------- */
+    private SpeechRecognizer lsr;
+    private PluginCall lcall;
+    private final StringBuilder ltext = new StringBuilder();
+    private String lpartial = "";
+    private boolean lactive;
+    private long lstart, lastAct;
+    private int lsessions, lerrors;
+    private long lsilence = 2300;
+
+    @PluginMethod
+    public void listenLong(PluginCall call) {
+        call.setKeepAlive(false);
+        main.post(() -> {
+            if (lactive) finishLong();
+            boolean w = wakeOn;
+            wakeOn = false;
+            killWake();
+            wakeOn = false;
+            if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+                call.reject("no_recognizer");
+                return;
+            }
+            lcall = call;
+            ltext.setLength(0);
+            lpartial = "";
+            lactive = true;
+            lstart = lastAct = System.currentTimeMillis();
+            lsessions = 0;
+            lerrors = 0;
+            lsilence = call.getInt("silence", 2300);
+            startLong();
+            main.postDelayed(this::watchLong, 400);
+        });
+    }
+
+    @PluginMethod
+    public void stopListen(PluginCall call) {
+        main.post(() -> {
+            if (lactive) finishLong();
+            call.resolve();
+        });
+    }
+
+    private String longText() {
+        String t = (ltext.toString() + " " + lpartial).trim();
+        return t.replaceAll("\\s+", " ");
+    }
+
+    private void emitPartial() {
+        notifyListeners("listenPartial", new JSObject().put("text", longText()));
+    }
+
+    private void watchLong() {
+        if (!lactive) return;
+        long now = System.currentTimeMillis();
+        boolean said = longText().length() > 0;
+        if ((said && now - lastAct > lsilence) || (!said && now - lstart > 9000) || now - lstart > 120000) {
+            finishLong();
+            return;
+        }
+        main.postDelayed(this::watchLong, 300);
+    }
+
+    private void finishLong() {
+        if (!lactive) return;
+        lactive = false;
+        String text = longText();
+        if (lsr != null) {
+            try { lsr.cancel(); } catch (Exception ignored) {}
+            try { lsr.destroy(); } catch (Exception ignored) {}
+            lsr = null;
+        }
+        mute(false);
+        PluginCall c = lcall;
+        lcall = null;
+        if (c != null) c.resolve(new JSObject().put("text", text));
+    }
+
+    private void startLong() {
+        if (!lactive) return;
+        try {
+            if (lsr == null) {
+                lsr = SpeechRecognizer.createSpeechRecognizer(getContext());
+                lsr.setRecognitionListener(new RecognitionListener() {
+                    @Override public void onReadyForSpeech(Bundle b) {}
+                    @Override public void onBeginningOfSpeech() { lastAct = System.currentTimeMillis(); }
+                    @Override public void onRmsChanged(float v) { if (v > 7f) lastAct = Math.max(lastAct, System.currentTimeMillis() - 900); }
+                    @Override public void onBufferReceived(byte[] b) {}
+                    @Override public void onEndOfSpeech() {}
+                    @Override public void onEvent(int t, Bundle b) {}
+                    @Override public void onPartialResults(Bundle b) {
+                        ArrayList<String> m = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                        if (m != null && !m.isEmpty() && m.get(0).trim().length() > 0) {
+                            lpartial = m.get(0).trim();
+                            lastAct = System.currentTimeMillis();
+                            emitPartial();
+                        }
+                    }
+                    @Override public void onResults(Bundle b) {
+                        ArrayList<String> m = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                        String seg = m != null && !m.isEmpty() ? m.get(0).trim() : lpartial;
+                        lpartial = "";
+                        if (seg.length() > 0) {
+                            if (ltext.length() > 0) ltext.append(' ');
+                            ltext.append(seg);
+                            lastAct = System.currentTimeMillis();
+                        }
+                        emitPartial();
+                        main.postDelayed(SmsmPlugin.this::startLong, 60);
+                    }
+                    @Override public void onError(int e) {
+                        if (!lactive) return;
+                        if (lpartial.length() > 0) {
+                            if (ltext.length() > 0) ltext.append(' ');
+                            ltext.append(lpartial);
+                            lpartial = "";
+                        }
+                        if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                            finishLong();
+                            return;
+                        }
+                        if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT || ++lerrors > 8) {
+                            if (lsr != null) { try { lsr.destroy(); } catch (Exception ignored) {} lsr = null; }
+                        }
+                        if (lerrors > 12) {
+                            finishLong();
+                            return;
+                        }
+                        main.postDelayed(SmsmPlugin.this::startLong, 120);
+                    }
+                });
+            }
+            if (lsessions++ > 0) mute(true);
+            Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG");
+            i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+            i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
+            i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+            i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+            lsr.startListening(i);
+        } catch (Exception e) {
+            main.postDelayed(this::startLong, 500);
+        }
+    }
+
     @Override
     protected void handleOnPause() {
         super.handleOnPause();
         wakePaused = true;
         main.post(() -> {
+            if (lactive) finishLong();
             if (wakeSr != null) { try { wakeSr.destroy(); } catch (Exception ignored) {} wakeSr = null; }
             mute(false);
         });

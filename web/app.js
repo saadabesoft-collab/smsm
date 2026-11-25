@@ -110,16 +110,24 @@ const canListen=()=>NATIVE||!!WebSR;
 let listening=false;
 function setLive(on,label){listening=on;$('#talk').classList.toggle('live',on);if(label!=null)heard(label)}
 function heard(t,cls){$('#heard').innerHTML=t?'<div class="heard'+(cls?' '+cls:'')+'">'+t+'</div>':''}
-async function listen(prompt){
+let stopListening=null;
+async function listen(prompt,onPart){
  if(!canListen()){toast('المتصفح ده مش بيدعم الكلام — جرّب Chrome أو اكتب تحت');return''}
  stopWake();setLive(true,'<b>سامعك…</b> '+esc(prompt||''));
+ const part=t=>{heard('<b>سامعك…</b> '+esc(t));if(onPart)onPart(t)};
  try{
   if(NATIVE){const p=await SRP.checkPermissions();if(p.speechRecognition!=='granted'){const r=await SRP.requestPermissions();if(r.speechRecognition!=='granted'){toast('محتاج إذن الميكروفون');return''}}
-   const r=await SRP.start({language:'ar-EG',maxResults:3,partialResults:false,popup:false,prompt:prompt||'قول لسمسم'});return(r&&r.matches&&r.matches[0])||''}
-  return await new Promise(res=>{const r=new WebSR();r.lang='ar-EG';r.interimResults=true;r.maxAlternatives=1;let fin='';
-   r.onresult=e=>{let t='';for(const x of e.results){t+=x[0].transcript;if(x.isFinal)fin=t}heard('<b>سامعك…</b> '+esc(t))};
-   r.onerror=()=>{};r.onend=()=>res(fin||'');r.start();setTimeout(()=>{try{r.stop()}catch(e){}},12000)})
- }catch(e){return''}finally{setLive(false);setTimeout(startWake,600)}}
+   let h=null;try{h=await NP.addListener('listenPartial',e=>part(e.text||''))}catch(e){}
+   stopListening=()=>NP.stopListen().catch(()=>{});
+   try{const r=await NP.listenLong({silence:S.set.silence||2300});return(r&&r.text)||''}
+   catch(e){const r=await SRP.start({language:'ar-EG',maxResults:3,partialResults:false,popup:false,prompt:prompt||'قول لسمسم'});return(r&&r.matches&&r.matches[0])||''}
+   finally{if(h&&h.remove)h.remove()}}
+  /* browser: keep listening across short pauses, stop after a quiet gap */
+  return await new Promise(res=>{const r=new WebSR();r.lang='ar-EG';r.interimResults=true;r.continuous=true;r.maxAlternatives=1;let fin='',cur='',quiet=null,started=Date.now();
+   const done=()=>{clearTimeout(quiet);try{r.stop()}catch(e){}};stopListening=done;
+   r.onresult=e=>{fin='';cur='';for(const x of e.results){if(x.isFinal)fin+=x[0].transcript+' ';else cur+=x[0].transcript}part((fin+cur).trim());clearTimeout(quiet);quiet=setTimeout(done,(S.set.silence||2300))};
+   r.onerror=()=>{};r.onend=()=>res((fin+cur).trim());r.start();setTimeout(()=>{if(!(fin+cur).trim())done()},9000);setTimeout(done,120000)})
+ }catch(e){return''}finally{stopListening=null;setLive(false);setTimeout(startWake,600)}}
 
 /* "يا سمسم" while the app is open (PC/browser) */
 let wakeR=null,wakeOn=false,wakeBusy=false;
@@ -198,7 +206,7 @@ function aiSystem(){const n=new Date();const tz=Intl.DateTimeFormat().resolvedOp
  'اتكلم دايماً بالعامية المصرية، بأسلوب صاحب خفيف ودود ومحترم. ردودك بتتقري بصوت عالي، فخليها قصيرة: جملة أو اتنين، من غير إيموجي ولا نجوم ولا قوائم ولا تنسيق، والأرقام والمواعيد قولها بالكلام زي "الساعة تلاتة ونص العصر".\n'+
  'النهارده '+WD[n.getDay()]+' '+dk(n)+' والساعة دلوقتي '+pad(n.getHours())+':'+pad(n.getMinutes())+(tz?' (توقيت '+tz+')':'')+'.'+(S.set.name?' اسم المستخدم '+S.set.name+'.':'')+'\n'+
  'قواعد:\n- لما يطلب تفكير بحاجة استخدم add_reminder على طول لو المعاد واضح. "بعد ساعة" احسبها من الوقت الحالي. "الصبح" من غير ساعة = ٩، "الضهر"=١، "العصر"=٤، "المغرب"=٦، "بالليل"=٩م. لو قال يوم من غير ساعة سجّل all_day ومعاده ٩ الصبح.\n'+
- '- لو المعاد مش واضح خالص اسأله سؤال واحد قصير.\n- قبل التعديل أو المسح أو "خلصت" استخدم الـ id الصح من القايمة أو من list_reminders، ولو فيه أكتر من تذكير شبه بعض اسأله يقصد أنهي.\n'+
+ '- المستخدم ممكن يقول كذا معاد في جملة واحدة: سجّلهم كلهم (استدعي add_reminder لكل واحد) وبعدين أكّد عليهم مع بعض.\n- كلامه جاي من تحويل صوت لكتابة فممكن يكون فيه كلمات غلط أو من غير ترقيم، افهم المقصود.\n- لو المعاد مش واضح خالص اسأله سؤال واحد قصير.\n- قبل التعديل أو المسح أو "خلصت" استخدم الـ id الصح من القايمة أو من list_reminders، ولو فيه أكتر من تذكير شبه بعض اسأله يقصد أنهي.\n'+
  '- بعد ما تنفّذ أكّد في جملة قصيرة بالمعاد.\n- لو سأل "ورايا إيه" قوله المهم باختصار.\n- متخترعش مواعيد هو ما قالهاش، ومتقولش إنك نفّذت حاجة من غير ما تستخدم الأداة.\n'+
  '- لو الكلام مش ليه علاقة بالمواعيد رد عادي باختصار، وارجع اسأله لو عايز يفتكر حاجة.\n\nالتذكيرات الجاية (id بين الأقواس):\n'+(up||'(مفيش)')}
 async function aiCall(body){const a=S.set.ai;const headers={'x-api-key':a.key,'anthropic-version':'2023-06-01','content-type':'application/json'};let st,txt;
@@ -223,8 +231,9 @@ function openChat(voice,first){go('home');chat.loop=!!voice;$('#v-chat').classLi
 function closeChat(){chat.loop=false;$('#v-chat').classList.remove('on');setTimeout(startWake,600)}
 $('#chatX').onclick=closeChat;
 $('#chatF').addEventListener('submit',e=>{e.preventDefault();const v=$('#chatI').value.trim();if(!v)return;$('#chatI').value='';chat.loop=false;chatSend(v,false)});
-$('#chatMic').onclick=()=>{if(listening)return;unlockAudio();chat.loop=true;chatListen()};
-async function chatListen(){$('#chatMic').classList.add('live');$('#chatSt').textContent='سامعك…';const t=await listen('اتكلم مع سمسم');$('#chatMic').classList.remove('live');$('#chatSt').textContent='اتكلم معايا عادي';heard('');
+$('#chatMic').onclick=()=>{if(listening){if(stopListening)stopListening();return}unlockAudio();chat.loop=true;chatListen()};
+async function chatListen(){$('#chatMic').classList.add('live');$('#chatSt').textContent='سامعك… خد راحتك، ولما تخلص اسكت ثانيتين أو دوس الميكروفون';const live=chatAdd('me','…');live.style.opacity=.6;
+ const t=await listen('اتكلم مع سمسم',x=>{live.textContent=x||'…'});live.remove();$('#chatMic').classList.remove('live');$('#chatSt').textContent='اتكلم معايا عادي';heard('');
  if(!t){chat.loop=false;return}await chatSend(t,true)}
 async function chatSend(text,voice){if(chat.busy)return;chat.busy=true;chatAdd('me',esc(text));const typing=chatAdd('ai','<span class="typing"><i></i><i></i><i></i></span>');chat.typingEl=typing;$('#chatSt').textContent='بيفكر…';let reply;
  try{reply=await askAI(text)}catch(e){typing.remove();chat.busy=false;$('#chatSt').textContent='اتكلم معايا عادي';
@@ -238,7 +247,7 @@ $('#sayF').addEventListener('submit',async e=>{e.preventDefault();const v=$('#sa
  if(!p.text){toast('اكتب الحاجة اللي عايز تفتكرها');return}
  if(!p.at){p.at=Date.now()+30*6e4;toast('محددتش وقت، هفكرك بعد نص ساعة — تقدر تعدّل')}
  const t=addTask({text:p.text,at:p.at,dayOnly:p.dayOnly,rep:p.rep});$('#sayI').value='';toast('تم التسجيل '+speakWhen(t));if(S.set.confirm)say(confirmParts(t))});
-$('#talk').onclick=()=>{if(listening)return;unlockAudio();if(aiOn())openChat(true);else converse()};
+$('#talk').onclick=()=>{if(listening){if(stopListening)stopListening();return}unlockAudio();if(aiOn())openChat(true);else converse()};
 const EX=['فكرني بعد نص ساعة أكلم محمد','فكرني كمان ساعتين أشتري عيش','فكرني بكرة الساعة ١٠ الصبح بالاجتماع','فكرني كل يوم الساعة ٩ بالليل أخد الدوا','فكرني يوم ١٥ ديسمبر عيد ميلاد مراتي','إيه ورايا النهارده؟'];
 $('#ex').innerHTML=EX.map(x=>'<button type="button">'+esc(x)+'</button>').join('');
 $('#ex').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(/ورايا/.test(b.textContent)){converse(b.textContent);return}$('#sayI').value=b.textContent;$('#sayI').focus()};
@@ -460,7 +469,7 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  '<div class="card"><h3>قفل اليوم</h3><div class="set"><label>اليوم بيتقفل الساعة<small>وبعدها يطلع التقرير ويسألك تنقل اللي فاضل لبكرة</small></label><select id="sClose">'+[0,1,2,3].map(h=>'<option value="'+h+'"'+(s.closeH===h?' selected':'')+'>'+(h?AR(h)+' بالليل':'١٢ بالليل')+'</option>').join('')+'</select></div></div>'+
  '<div class="card"><h3>الصوت والكلام</h3><div class="set"><label>سمسم يتكلم<small>يقول "بفكرك بـ…" و"تم التسجيل"</small></label><input type="checkbox" class="sw" id="sVoice"'+(s.voice?' checked':'')+'></div>'+
  '<div class="set"><label>يقول "تم التسجيل" بعد كل تذكير</label><input type="checkbox" class="sw" id="sConf"'+(s.confirm?' checked':'')+'></div>'+
- '<div class="set"><label>سرعة الكلام</label><input type="range" id="sRate" min="0.6" max="1.4" step="0.1" value="'+s.rate+'" style="width:150px"></div>'+
+ '<div class="set"><label>لما تسكت، سمسم يستنى قد إيه<small>قبل ما يعتبر إنك خلصت كلامك</small></label><select id="sSil">'+[[1500,'ثانية ونص'],[2300,'تقريباً ٢ ثانية'],[3500,'٣ ثواني ونص'],[5000,'٥ ثواني']].map(o=>'<option value="'+o[0]+'"'+((s.silence||2300)===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></div>'+'<div class="set"><label>سرعة الكلام</label><input type="range" id="sRate" min="0.6" max="1.4" step="0.1" value="'+s.rate+'" style="width:150px"></div>'+
  (canWake()?'<div class="set"><label>"يا سمسم" وهو مفتوح<small>قول "يا سمسم" ويفتحلك تذكير جديد بصوتك، أو قول الجملة كلها مرة واحدة: "يا سمسم فكرني بعد ساعة أكلم محمد".'+(NATIVE?' (وسمسم سامعك، صوت الأغاني بيتكتم عشان صفارة الميكروفون)':'')+'</small></label><input type="checkbox" class="sw" id="sWake"'+(s.wake?' checked':'')+'></div>':'')+
  (CLIPS.size?'<div class="set"><label>صوت حازم المصري<small>سمسم بيتكلم بصوت مصري مسجّل في الجمل الثابتة (تمام اتسجلت، بفكرك، المواعيد…) وكلامك نفسه بصوت الموبايل</small></label><input type="checkbox" class="sw" id="sClips"'+(s.clips!==false?' checked':'')+'></div>':'')+'<div class="set"><label>صوت الموبايل<small>جرّب الأصوات العربي واختار أحسنها</small></label><select id="sVc" style="max-width:200px"><option value="">تلقائي</option></select></div>'+'<div class="set"><label>جرّب الصوت</label><button class="btn sm ghost" id="sTry">اسمع</button></div>'+'<div class="set" style="display:block" id="cloudBox"></div>'+(NATIVE?'<div class="set"><label>صوت الكلام العربي<small>لو الصوت مش عربي نزّل اللغة العربية من إعدادات تحويل النص لكلام</small></label><button class="btn sm ghost" data-o="tts">افتح</button></div>':'')+'</div>'+
  '<div class="card" id="aiCard"></div>'+'<div class="card"><h3>الشكل</h3><div class="set"><label>الوضع<small>تقدر كمان تبدّل من زرار ☀️/🌙 فوق في الرئيسية</small></label><select id="sTheme"><option value="auto">تلقائي (نهاري الصبح وليلي بالليل)</option><option value="light"'+(s.theme==='light'?' selected':'')+'>نهاري ☀️</option><option value="dark"'+(s.theme==='dark'?' selected':'')+'>ليلي 🌙</option></select></div></div>'+
@@ -473,7 +482,7 @@ async function renderSet(){const s=S.set;let h='<div class="card"><h3>عنك</h3
  on('#sSn','click',e=>{const b=e.target.closest('[data-m]');if(!b)return;const m=+b.dataset.m;if(s.snooze.includes(m)){if(s.snooze.length<2)return;s.snooze=s.snooze.filter(x=>x!==m)}else s.snooze=[...s.snooze,m].sort((a,b)=>a-b);if(!s.snooze.includes(s.snDef))s.snDef=s.snooze[0];save();renderSet()});
  on('#sRep','change',e=>{s.repeat=+e.target.value;save()});on('#sSd','change',e=>{s.snDef=+e.target.value;save()});
  on('#sClose','change',e=>{s.closeH=+e.target.value;S.lastDay=logicalDay();save()});
- on('#sVoice','change',e=>{s.voice=e.target.checked;save()});on('#sConf','change',e=>{s.confirm=e.target.checked;save()});on('#sClips','change',e=>{s.clips=e.target.checked;save();if(s.clips)say([...nameParts(),'hello'],true)});on('#sRate','change',e=>{s.rate=+e.target.value;save();speak('أهلاً، أنا سمسم')});
+ on('#sVoice','change',e=>{s.voice=e.target.checked;save()});on('#sConf','change',e=>{s.confirm=e.target.checked;save()});on('#sSil','change',e=>{s.silence=+e.target.value;save()});on('#sClips','change',e=>{s.clips=e.target.checked;save();if(s.clips)say([...nameParts(),'hello'],true)});on('#sRate','change',e=>{s.rate=+e.target.value;save();speak('أهلاً، أنا سمسم')});
  on('#sWake','change',e=>{s.wake=e.target.checked;save();if(s.wake){unlockAudio();startWake();toast('قول "يا سمسم" في أي وقت والبرنامج مفتوح')}else stopWake()});
  on('#sTry','click',()=>say([...nameParts(),'hello'],true));
  on('#sTheme','change',e=>{s.theme=e.target.value;save();applyTheme()});
